@@ -1,0 +1,48 @@
+# 빌드 산출물 (Built application files)
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+*.class
+
+# 생성/빌드 디렉토리
+/build
+**/build/
+bin/
+gen/
+out/
+release/
+.externalNativeBuild/
+.cxx/
+
+# Gradle
+.gradle/
+.kotlin/
+
+# 로컬 설정 & 시크릿 (절대 커밋 금지 — GEMINI_API_KEY, sdk.dir 포함)
+local.properties
+secrets.properties
+keystore.properties
+
+# 서명 키 (Signing)
+*.jks
+*.keystore
+*.p12
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+*.hprof
+captures/
+
+# 로그
+*.log
+
+# 에디터
+.vscode/
+*.swp
+
+# OS 잡파일
+.DS_Store
+Thumbs.db
