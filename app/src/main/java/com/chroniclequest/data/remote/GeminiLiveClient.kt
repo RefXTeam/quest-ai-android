@@ -50,8 +50,11 @@ class GeminiLiveClient @Inject constructor(
             _events.tryEmit(GeminiEvent.Failure(IllegalStateException(MISSING_KEY_MESSAGE)))
             return
         }
-        val url = "$BASE_URL?key=$apiKey"
-        val request = Request.Builder().url(url).build()
+        // Key goes in a header, not the URL, so it never lands in request logs.
+        val request = Request.Builder()
+            .url(BASE_URL)
+            .addHeader("x-goog-api-key", apiKey)
+            .build()
         webSocket = okHttpClient.newWebSocket(request, listener(model))
     }
 

@@ -16,6 +16,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +31,15 @@ class GeminiRestClient @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val json: Json,
 ) {
+    // The shared client has no read timeout (it's tuned for the long-lived Live
+    // WebSocket). A turn evaluation is a bounded request, so cap it to avoid
+    // hanging forever if the network stalls. newBuilder() reuses the connection pool.
+    private val restHttpClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(40, TimeUnit.SECONDS)
+            .readTimeout(40, TimeUnit.SECONDS)
+            .build()
+    }
     /**
      * @return the tool calls the model chose to emit for this turn (often empty —
      * the agent stays silent unless something actionable is detected).
@@ -67,12 +77,14 @@ class GeminiRestClient @Inject constructor(
 
         val body = json.encodeToString(GenerateContentRequest.serializer(), request)
             .toRequestBody(JSON_MEDIA)
+        // Key goes in a header, not the URL, so it never lands in OkHttp request logs.
         val httpRequest = Request.Builder()
-            .url("$BASE_URL/$model:generateContent?key=$apiKey")
+            .url("$BASE_URL/$model:generateContent")
+            .addHeader("x-goog-api-key", apiKey)
             .post(body)
             .build()
 
-        okHttpClient.newCall(httpRequest).execute().use { response ->
+        restHttpClient.newCall(httpRequest).execute().use { response ->
             val payload = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 Log.w(TAG, "generateContent HTTP ${response.code}: ${payload.take(200)}")
