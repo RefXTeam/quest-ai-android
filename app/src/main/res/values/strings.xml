@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">용사님 퀘스트</string>
+    <string name="notification_channel_name">주변 퀘스트 엔진</string>
+    <string name="notification_channel_desc">주변 퀘스트 에이전트를 계속 실행합니다</string>
+    <string name="service_notification_title">용사님 퀘스트가 듣고 있어요</string>
+    <string name="service_notification_text">새로운 퀘스트를 찾는 중…</string>
+</resources>
