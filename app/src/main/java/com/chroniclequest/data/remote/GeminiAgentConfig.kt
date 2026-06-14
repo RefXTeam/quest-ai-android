@@ -83,10 +83,14 @@ targetValue UNITS are strict and depend on verificationMethod:
                 ),
                 "rewardExp" to PropertySchema("INTEGER", "Experience reward, 10-100"),
                 "rewardGold" to PropertySchema("INTEGER", "Gold reward, 5-50"),
+                "contextSummary" to PropertySchema(
+                    "STRING",
+                    "퀘스트를 유발한 당시 상황·대화의 한국어 한 줄 요약 (피드백 학습용)",
+                ),
             ),
             required = listOf(
                 "title", "description", "verificationMethod",
-                "targetValue", "rewardExp", "rewardGold",
+                "targetValue", "rewardExp", "rewardGold", "contextSummary",
             ),
         ),
     )

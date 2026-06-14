@@ -31,6 +31,10 @@ class GenerateQuestFromToolCallUseCase @Inject constructor(
         val targetValue = args.int("targetValue").coerceAtLeast(1)
         val rewardExp = args.int("rewardExp").coerceIn(10, 100)
         val rewardGold = args.int("rewardGold").coerceIn(5, 50)
+        // The model-supplied context summary is the few-shot fuel; fall back to the
+        // caller's placeholder only if the model didn't provide one.
+        val summary = args.string("contextSummary")?.takeIf { it.isNotBlank() }
+            ?: conversationSummary
 
         val quest = Quest(
             id = 0,
@@ -43,7 +47,7 @@ class GenerateQuestFromToolCallUseCase @Inject constructor(
             state = QuestState.TRIGGERED,
             createdAt = now,
         )
-        val id = questRepository.createTriggeredQuest(quest, conversationSummary, rawJson)
+        val id = questRepository.createTriggeredQuest(quest, summary, rawJson)
         return quest.copy(id = id)
     }
 

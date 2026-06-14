@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,6 +45,7 @@ import com.chroniclequest.presentation.components.QuestCard
 import com.chroniclequest.presentation.components.QuestModal
 import com.chroniclequest.presentation.components.StatHud
 import com.chroniclequest.presentation.narration.rememberQuestNarrator
+import com.chroniclequest.service.BatteryOptimization
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.launch
@@ -58,6 +60,7 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val narrator = rememberQuestNarrator()
     var confettiTrigger by remember { mutableIntStateOf(0) }
 
@@ -81,7 +84,11 @@ fun HomeScreen(
         }
     }
     val permissionState = rememberMultiplePermissionsState(requiredPermissions) { result ->
-        if (result.values.all { it }) viewModel.onPermissionsGranted()
+        if (result.values.all { it }) {
+            // Keep the agent alive in the background past OEM battery killers.
+            BatteryOptimization.requestIgnore(context)
+            viewModel.onPermissionsGranted()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -132,6 +139,7 @@ fun HomeScreen(
                     if (state.isListening) {
                         viewModel.onIntent(HomeIntent.ToggleListening)
                     } else if (permissionState.allPermissionsGranted) {
+                        BatteryOptimization.requestIgnore(context)
                         viewModel.onIntent(HomeIntent.ToggleListening)
                     } else {
                         permissionState.launchMultiplePermissionRequest()
@@ -205,8 +213,8 @@ private fun HomeContent(
         if (state.activeQuests.isEmpty()) {
             item { EmptyQuestState(state.isListening) }
         } else {
-            items(state.activeQuests, key = Quest::id) { quest ->
-                QuestCard(quest = quest, onCompleteManual = onCompleteManual)
+            items(state.activeQuests, key = { it.quest.id }) { uiModel ->
+                QuestCard(uiModel = uiModel, onCompleteManual = onCompleteManual)
             }
         }
     }
