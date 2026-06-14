@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.chroniclequest.domain.model.Quest
+import com.chroniclequest.domain.model.QuestProgress
 import com.chroniclequest.domain.model.VerificationMethod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +55,17 @@ class StepCountVerifier @Inject constructor(
         callbacks.remove(questId)
         baselines.remove(questId)
         if (targets.isEmpty()) teardownListening()
+    }
+
+    override fun progress(questId: Long, now: Long): QuestProgress? {
+        val quest = targets[questId] ?: return null
+        val baseline = baselines[questId]
+        val walked = if (baseline == null || baseline.isNaN() || latestCount.isNaN()) {
+            0
+        } else {
+            (latestCount - baseline).toInt().coerceAtLeast(0)
+        }
+        return QuestProgress(current = walked, target = quest.targetValue)
     }
 
     override fun onSensorChanged(event: SensorEvent) {

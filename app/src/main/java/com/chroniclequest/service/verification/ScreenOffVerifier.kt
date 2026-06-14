@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
 import com.chroniclequest.domain.model.Quest
+import com.chroniclequest.domain.model.QuestProgress
 import com.chroniclequest.domain.model.VerificationMethod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +38,8 @@ class ScreenOffVerifier @Inject constructor(
     private val targets = ConcurrentHashMap<Long, Quest>()
     private val countdowns = ConcurrentHashMap<Long, Job>()
     private val callbacks = ConcurrentHashMap<Long, (Long) -> Unit>()
+    // Epoch millis when the current screen-off streak began (absent = screen is on).
+    private val streakStart = ConcurrentHashMap<Long, Long>()
     private var receiverRegistered = false
 
     private val receiver = object : BroadcastReceiver() {
@@ -59,11 +62,21 @@ class ScreenOffVerifier @Inject constructor(
         targets.remove(questId)
         callbacks.remove(questId)
         countdowns.remove(questId)?.cancel()
+        streakStart.remove(questId)
         if (targets.isEmpty()) teardownReceiver()
     }
 
+    override fun progress(questId: Long, now: Long): QuestProgress? {
+        val quest = targets[questId] ?: return null
+        val start = streakStart[questId]
+        val minutesOff = if (start != null) ((now - start) / 60_000L).toInt() else 0
+        return QuestProgress(current = minutesOff, target = quest.targetValue)
+    }
+
     private fun startCountdowns() {
+        val now = System.currentTimeMillis()
         targets.values.forEach { quest ->
+            streakStart.putIfAbsent(quest.id, now)
             if (countdowns[quest.id]?.isActive == true) return@forEach
             countdowns[quest.id] = scope.launch {
                 delay(TimeUnit.MINUTES.toMillis(quest.targetValue.toLong()))
@@ -76,6 +89,7 @@ class ScreenOffVerifier @Inject constructor(
     private fun cancelCountdowns() {
         countdowns.values.forEach { it.cancel() }
         countdowns.clear()
+        streakStart.clear()
     }
 
     private fun ensureReceiver() {

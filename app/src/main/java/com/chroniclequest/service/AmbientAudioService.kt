@@ -44,10 +44,10 @@ class AmbientAudioService : LifecycleService() {
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
-            AudioManager.AUDIOFOCUS_LOSS,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                Log.d(TAG, "Audio focus lost ($change) — pausing capture")
+            // Transient loss = a phone/VoIP call or nav prompt grabbed audio.
+            // Pause the mic (spec: release on call) and resume when focus returns.
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                Log.d(TAG, "Transient focus loss (call?) — pausing capture")
                 hasFocus = false
                 stopCapture()
             }
@@ -55,6 +55,11 @@ class AmbientAudioService : LifecycleService() {
                 Log.d(TAG, "Audio focus regained — resuming capture")
                 hasFocus = true
                 startCapture()
+            }
+            // Permanent loss (another app started media) or duck: keep capturing so
+            // ambient detection survives in the background while music/video plays.
+            else -> {
+                Log.d(TAG, "Focus change $change — keeping ambient capture alive")
             }
         }
     }

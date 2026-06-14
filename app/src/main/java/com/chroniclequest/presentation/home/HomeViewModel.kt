@@ -14,12 +14,14 @@ import com.chroniclequest.service.AmbientServiceController
 import com.chroniclequest.service.QuestVerificationManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -42,14 +44,38 @@ class HomeViewModel @Inject constructor(
     private val _effects = Channel<HomeEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    // 1-second tick to drive deadline countdowns and live verification progress.
+    private val ticker = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(1_000)
+        }
+    }
+
     val state: StateFlow<HomeState> = combine(
         userStatsRepository.observeStats(),
         questRepository.observeActiveQuests(),
         AmbientAudioService.isRunning,
-    ) { stats, quests, running ->
+        ticker,
+    ) { stats, quests, running, now ->
         HomeState(
             stats = stats,
-            activeQuests = quests,
+            activeQuests = quests.map { quest ->
+                QuestUiModel(
+                    quest = quest,
+                    remainingMillis = quest.deadlineAt?.let { (it - now).coerceAtLeast(0) },
+                    windowMillis = if (quest.acceptedAt != null && quest.deadlineAt != null) {
+                        quest.deadlineAt - quest.acceptedAt
+                    } else {
+                        null
+                    },
+                    progress = if (quest.state == QuestState.ACCEPTED) {
+                        verificationManager.progressOf(quest.id, now)
+                    } else {
+                        null
+                    },
+                )
+            },
             pendingQuest = quests.firstOrNull { it.state == QuestState.TRIGGERED },
             isListening = running,
             isLoading = false,

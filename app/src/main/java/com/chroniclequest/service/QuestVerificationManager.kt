@@ -4,6 +4,7 @@ import android.util.Log
 import com.chroniclequest.domain.AmbientEventBus
 import com.chroniclequest.domain.AmbientSignal
 import com.chroniclequest.domain.model.Quest
+import com.chroniclequest.domain.model.QuestProgress
 import com.chroniclequest.domain.model.QuestState
 import com.chroniclequest.domain.model.VerificationMethod
 import com.chroniclequest.domain.repository.QuestRepository
@@ -59,6 +60,12 @@ class QuestVerificationManager @Inject constructor(
     }
 
     fun armedQuests(): Collection<Quest> = armed.values
+
+    /** Current verification progress for an armed quest, or null if none. */
+    fun progressOf(questId: Long, now: Long): QuestProgress? {
+        val quest = armed[questId] ?: return null
+        return verifiers[quest.verificationMethod]?.progress(questId, now)
+    }
 
     /** Re-arm accepted-but-unverified quests after a process/service restart. */
     fun restoreArmed() {
