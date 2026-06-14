@@ -2,6 +2,7 @@ package com.chroniclequest.service
 
 import android.util.Log
 import com.chroniclequest.BuildConfig
+import com.chroniclequest.data.analytics.FewShotBuilder
 import com.chroniclequest.data.audio.AudioConfig
 import com.chroniclequest.data.audio.WavEncoder
 import com.chroniclequest.data.remote.GeminiEvent
@@ -32,6 +33,7 @@ class AmbientQuestPipeline @Inject constructor(
     private val silenceDetector: SilenceDetector,
     private val cooldownEngine: CooldownEngine,
     private val generateQuest: GenerateQuestFromToolCallUseCase,
+    private val fewShotBuilder: FewShotBuilder,
     private val eventBus: AmbientEventBus,
 ) : AmbientPipeline {
 
@@ -80,11 +82,14 @@ class AmbientQuestPipeline @Inject constructor(
         if (BuildConfig.GEMINI_API_KEY.isBlank()) return
 
         activeScope.launch {
+            // On-device self-improvement: feed the user's own success/failure history.
+            val fewShot = runCatching { fewShotBuilder.build() }.getOrNull()
             runCatching {
                 restClient.evaluateTurn(
                     wavBase64 = WavEncoder.pcmToWavBase64(samples),
                     model = BuildConfig.GEMINI_REST_MODEL,
                     apiKey = BuildConfig.GEMINI_API_KEY,
+                    fewShot = fewShot,
                 )
             }.onSuccess { calls ->
                 Log.d(TAG, "Turn evaluated: ${calls.size} tool call(s)")

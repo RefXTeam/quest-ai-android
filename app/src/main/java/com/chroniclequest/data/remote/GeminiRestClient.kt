@@ -48,6 +48,7 @@ class GeminiRestClient @Inject constructor(
         wavBase64: String,
         model: String,
         apiKey: String,
+        fewShot: String? = null,
     ): List<GeminiEvent.ToolCallReceived> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             throw IllegalStateException(GeminiLiveClient.MISSING_KEY_MESSAGE)
@@ -66,7 +67,7 @@ class GeminiRestClient @Inject constructor(
                     ),
                 ),
             ),
-            systemInstruction = GeminiAgentConfig.systemInstruction(),
+            systemInstruction = GeminiAgentConfig.systemInstruction(fewShot),
             tools = GeminiAgentConfig.tools(),
             toolConfig = ToolConfig(FunctionCallingConfig(mode = "AUTO")),
             generationConfig = GenerationConfig(
