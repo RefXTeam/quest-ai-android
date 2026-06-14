@@ -25,6 +25,8 @@ object BatteryOptimization {
         if (isIgnoring(context)) return
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
             data = Uri.parse("package:${context.packageName}")
+            // Safe to launch even from a non-Activity context (e.g. service/app context).
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { context.startActivity(intent) }
     }

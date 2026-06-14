@@ -39,7 +39,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.chroniclequest.domain.model.Quest
 import com.chroniclequest.presentation.components.ConfettiCanvas
 import com.chroniclequest.presentation.components.QuestCard
 import com.chroniclequest.presentation.components.QuestModal
