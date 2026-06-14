@@ -42,20 +42,26 @@ targetValue UNITS are strict and depend on verificationMethod:
  - MEDIA_PLAY / USER_MANUAL: targetValue is 1.
 """
 
-    fun buildSetup(model: String): SetupPayload = SetupPayload(
+    fun buildSetup(model: String, fewShot: String? = null): SetupPayload = SetupPayload(
         model = model,
         generationConfig = GenerationConfig(
             responseModalities = listOf("TEXT"),
             temperature = 0.8,
         ),
-        systemInstruction = systemInstruction(),
+        systemInstruction = systemInstruction(fewShot),
         tools = tools(),
     )
 
-    /** Shared between the Live setup and the REST fallback request. */
-    fun systemInstruction(): Content = Content(
-        parts = listOf(Part(text = SYSTEM_INSTRUCTION.trim())),
-    )
+    /**
+     * Shared between the Live setup and the REST fallback request. [fewShot], when
+     * present, appends on-device success/failure examples so the agent self-improves
+     * from the user's own past reactions (no external training).
+     */
+    fun systemInstruction(fewShot: String? = null): Content {
+        val base = SYSTEM_INSTRUCTION.trim()
+        val text = if (fewShot.isNullOrBlank()) base else "$base\n\n$fewShot"
+        return Content(parts = listOf(Part(text = text)))
+    }
 
     fun tools(): List<Tool> =
         listOf(Tool(functionDeclarations = listOf(giveUserQuest(), sendInsightTip())))
