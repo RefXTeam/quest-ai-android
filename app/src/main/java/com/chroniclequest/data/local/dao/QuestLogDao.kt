@@ -46,4 +46,7 @@ interface QuestLogDao {
 
     @Query("SELECT * FROM quest_log WHERE state = :state ORDER BY timestamp DESC")
     suspend fun getByState(state: QuestState): List<QuestLogEntity>
+
+    @Query("SELECT * FROM quest_log WHERE state IN (:states) ORDER BY timestamp DESC")
+    suspend fun getByStates(states: List<QuestState>): List<QuestLogEntity>
 }

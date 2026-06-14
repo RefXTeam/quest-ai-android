@@ -20,13 +20,13 @@ class FewShotBuilder @Inject constructor(
         maxSuccess: Int = 3,
         maxFailure: Int = 3,
     ): String? {
-        val success = questLogDao.getByState(QuestState.COMPLETED)
-            .filter { it.hasContext() }
-            .take(maxSuccess)
-        val failure = (questLogDao.getByState(QuestState.DISMISSED) +
-            questLogDao.getByState(QuestState.EXPIRED))
-            .filter { it.hasContext() }
-            .sortedByDescending { it.timestamp }
+        // Single query (timestamp DESC) instead of three full scans.
+        val rows = questLogDao.getByStates(
+            listOf(QuestState.COMPLETED, QuestState.DISMISSED, QuestState.EXPIRED),
+        ).filter { it.hasContext() }
+        val success = rows.filter { it.state == QuestState.COMPLETED }.take(maxSuccess)
+        val failure = rows
+            .filter { it.state == QuestState.DISMISSED || it.state == QuestState.EXPIRED }
             .take(maxFailure)
 
         if (success.isEmpty() && failure.isEmpty()) return null
