@@ -89,7 +89,14 @@ class GeminiRestClient @Inject constructor(
             val payload = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 Log.w(TAG, "generateContent HTTP ${response.code}: ${payload.take(200)}")
-                return@withContext emptyList()
+                // Surface as an error (not an empty "silent" response) so the monitor
+                // shows the real reason instead of "함수 호출 없음".
+                val reason = if (response.code == 429) {
+                    "API 호출 한도 초과 (429) — 잠시 후 다시 시도해 주세요"
+                } else {
+                    "AI 요청 실패 (HTTP ${response.code})"
+                }
+                throw IllegalStateException(reason)
             }
             val parsed = runCatching {
                 json.decodeFromString(GenerateContentResponse.serializer(), payload)

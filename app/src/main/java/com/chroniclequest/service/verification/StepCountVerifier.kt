@@ -15,74 +15,100 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Verifies a "walk N steps" quest using [Sensor.TYPE_STEP_COUNTER]. The counter is
- * a monotonic since-boot value, so each quest records a baseline at arm time and
- * completes when (current − baseline) ≥ its target. Requires ACTIVITY_RECOGNITION.
+ * Verifies a "walk N steps" quest. Prefers [Sensor.TYPE_STEP_DETECTOR] (one event
+ * per step, no batching → real-time progress) and counts steps since arming. Falls
+ * back to [Sensor.TYPE_STEP_COUNTER] (monotonic total, baseline delta) on devices
+ * without a detector. **Requires the ACTIVITY_RECOGNITION runtime permission** —
+ * without it the OS delivers no step events at all.
  */
 @Singleton
 class StepCountVerifier @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @ApplicationContext context: Context,
 ) : QuestVerifier, SensorEventListener {
 
     override val method = VerificationMethod.STEP_COUNT
 
     private val sensorManager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val stepSensor: Sensor? =
-        sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    private val stepDetector: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+    private val stepCounter: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    private val useDetector = stepDetector != null
+    private val sensor: Sensor? = stepDetector ?: stepCounter
 
-    private val baselines = ConcurrentHashMap<Long, Float>()
     private val targets = ConcurrentHashMap<Long, Quest>()
     private val callbacks = ConcurrentHashMap<Long, (Long) -> Unit>()
+    // Detector mode: steps counted since arming. Counter mode: baseline total at arm.
+    private val walked = ConcurrentHashMap<Long, Int>()
+    private val baselines = ConcurrentHashMap<Long, Float>()
     private var latestCount: Float = Float.NaN
     private var listening = false
 
     override fun start(quest: Quest, onComplete: (Long) -> Unit) {
-        if (stepSensor == null) {
-            Log.w(TAG, "No step counter on device — quest #${quest.id} cannot auto-verify")
+        if (sensor == null) {
+            Log.w(TAG, "No step sensor — quest #${quest.id} cannot auto-verify")
             return
         }
         targets[quest.id] = quest
         callbacks[quest.id] = onComplete
-        // Baseline is set on the first sensor event after arming.
-        baselines[quest.id] = if (latestCount.isNaN()) Float.NaN else latestCount
+        if (useDetector) {
+            walked[quest.id] = 0
+        } else {
+            baselines[quest.id] = if (latestCount.isNaN()) Float.NaN else latestCount
+        }
         ensureListening()
-        Log.d(TAG, "Watching step quest #${quest.id} (+${quest.targetValue} steps)")
+        Log.d(TAG, "Watching step quest #${quest.id} (+${quest.targetValue}, detector=$useDetector)")
     }
 
     override fun stop(questId: Long) {
         targets.remove(questId)
         callbacks.remove(questId)
+        walked.remove(questId)
         baselines.remove(questId)
         if (targets.isEmpty()) teardownListening()
     }
 
     override fun progress(questId: Long, now: Long): QuestProgress? {
         val quest = targets[questId] ?: return null
-        val baseline = baselines[questId]
-        val walked = if (baseline == null || baseline.isNaN() || latestCount.isNaN()) {
-            0
+        val steps = if (useDetector) {
+            walked[questId] ?: 0
         } else {
-            (latestCount - baseline).toInt().coerceAtLeast(0)
+            val baseline = baselines[questId]
+            if (baseline == null || baseline.isNaN() || latestCount.isNaN()) 0
+            else (latestCount - baseline).toInt().coerceAtLeast(0)
         }
-        return QuestProgress(current = walked, target = quest.targetValue)
+        return QuestProgress(current = steps, target = quest.targetValue)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
-        val total = event.values.firstOrNull() ?: return
-        latestCount = total
-        Log.d(TAG, "step counter event: total=$total")
-
-        targets.values.forEach { quest ->
-            val baseline = baselines[quest.id]
-            if (baseline == null || baseline.isNaN()) {
-                baselines[quest.id] = total // first reading after arming
-                return@forEach
+        when (event.sensor.type) {
+            Sensor.TYPE_STEP_DETECTOR -> {
+                val inc = event.values.firstOrNull()?.toInt()?.coerceAtLeast(1) ?: 1
+                Log.d(TAG, "step detector +$inc")
+                targets.keys.toList().forEach { id ->
+                    val total = (walked[id] ?: 0) + inc
+                    walked[id] = total
+                    val target = targets[id]?.targetValue ?: return@forEach
+                    if (total >= target) {
+                        callbacks[id]?.invoke(id)
+                        stop(id)
+                    }
+                }
             }
-            if (total - baseline >= quest.targetValue) {
-                callbacks[quest.id]?.invoke(quest.id)
-                stop(quest.id)
+            Sensor.TYPE_STEP_COUNTER -> {
+                val total = event.values.firstOrNull() ?: return
+                latestCount = total
+                Log.d(TAG, "step counter total=$total")
+                targets.values.forEach { quest ->
+                    val baseline = baselines[quest.id]
+                    if (baseline == null || baseline.isNaN()) {
+                        baselines[quest.id] = total
+                        return@forEach
+                    }
+                    if (total - baseline >= quest.targetValue) {
+                        callbacks[quest.id]?.invoke(quest.id)
+                        stop(quest.id)
+                    }
+                }
             }
         }
     }
@@ -90,12 +116,9 @@ class StepCountVerifier @Inject constructor(
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun ensureListening() {
-        if (listening || stepSensor == null) return
-        // SENSOR_DELAY_UI + maxReportLatencyUs=0 disables batching so step events
-        // arrive immediately (TYPE_STEP_COUNTER otherwise batches to save power,
-        // making progress lag). on-change sensor also reports the current total once
-        // on registration, so the baseline is captured right away.
-        sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI, 0)
+        if (listening || sensor == null) return
+        // FASTEST + no batching for immediate per-step updates during the demo.
+        sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_FASTEST, 0)
         listening = true
     }
 
