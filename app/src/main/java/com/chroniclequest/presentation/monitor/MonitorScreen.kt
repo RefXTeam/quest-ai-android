@@ -49,7 +49,7 @@ fun MonitorScreen(
 ) {
     val events by viewModel.events.collectAsStateWithLifecycle()
 
-    Scaffoldless(
+    MonitorContent(
         onBack = onBack,
         onClear = viewModel::clear,
         webUrl = viewModel.webUrl,
@@ -59,7 +59,7 @@ fun MonitorScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Scaffoldless(
+private fun MonitorContent(
     onBack: () -> Unit,
     onClear: () -> Unit,
     webUrl: String?,
