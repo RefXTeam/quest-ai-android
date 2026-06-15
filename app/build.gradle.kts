@@ -36,8 +36,9 @@ android {
             "GEMINI_LIVE_MODEL",
             "\"models/gemini-2.0-flash-live-001\"",
         )
-        // REST fallback model (used when the key has no Live/bidi access).
-        buildConfigField("String", "GEMINI_REST_MODEL", "\"gemini-2.5-flash\"")
+        // REST fallback model. flash-lite: audio input 3.3x cheaper, output 6x cheaper,
+        // 2x free-tier RPM (429 relief), faster — ample for this signal→tool-call task.
+        buildConfigField("String", "GEMINI_REST_MODEL", "\"gemini-2.5-flash-lite\"")
     }
 
     buildTypes {

@@ -47,7 +47,7 @@ flowchart TD
 
     Eval["AmbientQuestPipeline<br/>턴 평가"] --> Wav["WavEncoder<br/>PCM → WAV"]
     Eval --> FS["FewShotBuilder<br/>(과거 성공/실패 사례)"]
-    Wav --> Rest["GeminiRestClient<br/>generateContent (gemini-2.5-flash)"]
+    Wav --> Rest["GeminiRestClient<br/>generateContent (gemini-2.5-flash-lite)"]
     FS -.->|"시스템 프롬프트 주입"| Rest
     Rest -->|"functionCall<br/>(triggerDynamicQuest/giveUserQuest)"| Cool{"CooldownEngine<br/>쿨다운 경과?"}
     Cool -->|"아니오"| Drop["억제 (퀘스트 생성 안 함)"]
@@ -206,11 +206,15 @@ flowchart LR
 
 | 경로 | 사용 시점 | 동작 |
 |------|-----------|------|
-| **REST 폴백** (기본) | Live 권한 없는 키 | 3초 침묵마다 누적 음성을 **WAV 한 클립**으로 `generateContent`(`gemini-2.5-flash`)에 전송 |
+| **REST 폴백** (기본) | Live 권한 없는 키 | 3초 침묵마다 누적 음성을 **WAV 한 클립**으로 `generateContent`(`gemini-2.5-flash-lite`)에 전송 |
 | **Live (WebSocket)** | Live(`bidiGenerateContent`) 권한 있는 키 | base64 PCM 실시간 스트리밍, 서버 `toolCall` 수신 |
 
 > 대부분의 Gemini 키는 Live API가 비활성(`1008` 거부)이라 **REST 폴백이 기본 경로**입니다. API 키는 URL이
 > 아닌 **`x-goog-api-key` 헤더**로 전달해 로그 노출을 막습니다.
+>
+> **모델 선택**: 이 앱(오디오 입력 위주·잦은 호출·단순 함수 호출)에는 **`gemini-2.5-flash-lite`** 를 씁니다 —
+> 오디오 입력 3.3배·출력 6배 저렴, 무료 티어 RPM 2배(`429` 완화), 더 빠름. `429`는 빈 응답이 아니라
+> 명확한 에러로 처리해 모니터에 "API 호출 한도 초과(429)"로 표시됩니다.
 
 ---
 
@@ -243,9 +247,12 @@ flowchart LR
 | 메서드 | 검증 방법 |
 |--------|-----------|
 | `SCREEN_OFF` | `BroadcastReceiver`(화면 on/off) — N분간 화면 꺼짐 유지 |
-| `STEP_COUNT` | `TYPE_STEP_COUNTER` 델타 — `maxReportLatency=0`로 **걸음 즉시 반영** |
+| `STEP_COUNT` | **`TYPE_STEP_DETECTOR`(걸음마다 즉시 이벤트)** 우선 + `TYPE_STEP_COUNTER` fallback — 걸음 단위 실시간 반영 |
 | `MEDIA_PLAY` | `AudioManager.isMusicActive` 폴링 (`MediaSessionManager`는 알림 접근 권한 필요 — 후속 과제) |
 | `USER_MANUAL` / `USER_CHECK` | 인앱 체크인 버튼 |
+
+> ⚠️ 걸음 센서는 **`ACTIVITY_RECOGNITION`(신체 활동) 런타임 권한**이 있어야 이벤트가 옵니다. 앱은 에이전트
+> 시작 시 마이크·알림과 함께 이 권한도 요청합니다. (권한이 없으면 진행도가 0에 멈춥니다.)
 
 진행도는 `QuestVerifier.progress(now)` → `QuestVerificationManager.progressOf()` → `HomeViewModel`의
 1초 ticker → 카드 진행 바·남은시간으로 표시됩니다.
@@ -293,8 +300,9 @@ flowchart LR
    ./gradlew installDebug   # 에뮬레이터/실기기 (API 29+)
    ```
 
-3. 실행 → **`에이전트 시작`** → 마이크·알림·배터리 최적화 제외 허용 → 주변을 말하면 약 3초 침묵 후
-   퀘스트가 등장하고 TTS가 낭독합니다.
+3. 실행 → **`에이전트 시작`** → **마이크·알림·신체 활동(걸음)·배터리 최적화 제외** 허용 → 주변을 말하면
+   약 3초 침묵 후 퀘스트가 등장하고 TTS가 낭독합니다. ("운동을 안 해서 힘들다", "너무 많이 먹어서 배부르다"
+   같은 명확한 신호면 퀘스트가 잘 뜹니다.)
 
 > 💡 데모용 쿨다운은 **1분**(`CooldownEngine.DEFAULT_COOLDOWN_MS`)입니다. 프로덕션은 20분으로
 > 되돌리세요. 인메모리라 앱을 완전 종료 후 재실행하면 쿨다운이 초기화됩니다.

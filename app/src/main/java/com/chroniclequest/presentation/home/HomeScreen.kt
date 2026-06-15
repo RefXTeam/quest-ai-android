@@ -79,6 +79,8 @@ fun HomeScreen(
     val requiredPermissions = remember {
         buildList {
             add(Manifest.permission.RECORD_AUDIO)
+            // API 29+ dangerous permission — without it, step sensor events never fire.
+            add(Manifest.permission.ACTIVITY_RECOGNITION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
