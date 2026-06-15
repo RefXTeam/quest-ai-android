@@ -32,6 +32,8 @@ class CooldownEngine @Inject constructor() {
     }
 
     companion object {
-        const val DEFAULT_COOLDOWN_MS = 20 * 60 * 1_000L // 20 minutes
+        // Demo/presentation setting: 1-minute cooldown for fast flow walkthroughs.
+        // (Production value was 20 minutes: 20 * 60 * 1_000L.)
+        const val DEFAULT_COOLDOWN_MS = 60 * 1_000L // 1 minute
     }
 }

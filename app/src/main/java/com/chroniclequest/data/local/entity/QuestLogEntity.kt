@@ -2,6 +2,7 @@ package com.chroniclequest.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.chroniclequest.domain.model.QuestCategory
 import com.chroniclequest.domain.model.QuestState
 import com.chroniclequest.domain.model.VerificationMethod
 
@@ -28,4 +29,6 @@ data class QuestLogEntity(
     val state: QuestState,
     val acceptedAt: Long? = null,
     val deadlineAt: Long? = null,
+    // Optional category from triggerDynamicQuest (null for legacy giveUserQuest)
+    val category: QuestCategory? = null,
 )

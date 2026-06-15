@@ -10,6 +10,8 @@ import com.chroniclequest.data.remote.GeminiRestClient
 import com.chroniclequest.data.remote.GeminiTools
 import com.chroniclequest.domain.AmbientEventBus
 import com.chroniclequest.domain.AmbientSignal
+import com.chroniclequest.domain.PipelineMonitor
+import com.chroniclequest.domain.model.PipelineStage
 import com.chroniclequest.domain.engine.CooldownEngine
 import com.chroniclequest.domain.engine.SilenceDetector
 import com.chroniclequest.domain.usecase.GenerateQuestFromToolCallUseCase
@@ -35,6 +37,7 @@ class AmbientQuestPipeline @Inject constructor(
     private val generateQuest: GenerateQuestFromToolCallUseCase,
     private val fewShotBuilder: FewShotBuilder,
     private val eventBus: AmbientEventBus,
+    private val monitor: PipelineMonitor,
 ) : AmbientPipeline {
 
     private var scope: CoroutineScope? = null
@@ -51,6 +54,7 @@ class AmbientQuestPipeline @Inject constructor(
             eventBus.emit(AmbientSignal.AgentError("GEMINI_API_KEY is empty — add it to local.properties."))
         }
         Log.d(TAG, "Pipeline started (REST mode, model=${BuildConfig.GEMINI_REST_MODEL})")
+        monitor.log(PipelineStage.LISTENING, "에이전트 시작 — 주변 음성 감지 중")
     }
 
     override fun onVoicedChunk(chunk: ShortArray) {
@@ -61,6 +65,7 @@ class AmbientQuestPipeline @Inject constructor(
     override fun onSilenceChunk() {
         if (silenceDetector.onSilence(System.currentTimeMillis())) {
             Log.d(TAG, "Turn complete (3s pause) — evaluating")
+            monitor.log(PipelineStage.TURN, "3초 침묵 감지 — 대화 턴 종료, 평가 시작")
             evaluateTurn()
         }
     }
@@ -84,6 +89,12 @@ class AmbientQuestPipeline @Inject constructor(
         activeScope.launch {
             // On-device self-improvement: feed the user's own success/failure history.
             val fewShot = runCatching { fewShotBuilder.build() }.getOrNull()
+            val seconds = samples.size.toDouble() / AudioConfig.SAMPLE_RATE
+            monitor.log(
+                PipelineStage.AI_REQUEST,
+                "Gemini로 음성 전송 (gemini-2.5-flash)",
+                "오디오 %.1f초".format(seconds) + if (fewShot != null) " · few-shot 적용" else "",
+            )
             runCatching {
                 restClient.evaluateTurn(
                     wavBase64 = WavEncoder.pcmToWavBase64(samples),
@@ -93,16 +104,28 @@ class AmbientQuestPipeline @Inject constructor(
                 )
             }.onSuccess { calls ->
                 Log.d(TAG, "Turn evaluated: ${calls.size} tool call(s)")
+                monitor.log(
+                    PipelineStage.AI_RESPONSE,
+                    if (calls.isEmpty()) "응답 수신 — 함수 호출 없음 (침묵 유지)" else "응답 수신",
+                    if (calls.isEmpty()) null else "함수 호출 ${calls.size}개",
+                )
                 calls.forEach(::onToolCall)
             }.onFailure { e ->
                 Log.e(TAG, "Turn evaluation failed", e)
+                monitor.log(PipelineStage.ERROR, "AI 요청 실패", e.message)
                 eventBus.emit(AmbientSignal.AgentError(e.message ?: "Agent request failed"))
             }
         }
     }
 
     private fun onToolCall(event: GeminiEvent.ToolCallReceived) {
+        monitor.log(
+            PipelineStage.TOOL_CALL,
+            event.name,
+            event.args.stringValue("title") ?: event.args.stringValue("message"),
+        )
         when (event.name) {
+            GeminiTools.TRIGGER_DYNAMIC_QUEST,
             GeminiTools.GIVE_USER_QUEST -> handleQuestToolCall(event)
             GeminiTools.SEND_INSIGHT_TIP -> handleInsightTip(event)
             else -> Log.w(TAG, "Unknown tool call: ${event.name}")
@@ -112,8 +135,9 @@ class AmbientQuestPipeline @Inject constructor(
     private fun handleQuestToolCall(event: GeminiEvent.ToolCallReceived) {
         val now = System.currentTimeMillis()
         if (!cooldownEngine.canTrigger(now)) {
-            val mins = cooldownEngine.millisUntilReady(now) / 60_000
-            Log.d(TAG, "Quest suppressed by cooldown (~$mins min left)")
+            val secs = cooldownEngine.millisUntilReady(now) / 1_000
+            Log.d(TAG, "Quest suppressed by cooldown (~${secs}s left)")
+            monitor.log(PipelineStage.COOLDOWN, "쿨다운으로 퀘스트 생성 억제", "${secs}초 후 생성 가능")
             return
         }
         val activeScope = scope ?: return
@@ -128,8 +152,14 @@ class AmbientQuestPipeline @Inject constructor(
             }.onSuccess { quest ->
                 cooldownEngine.markTriggered(now)
                 Log.d(TAG, "Quest created: ${quest.title} (#${quest.id})")
+                monitor.log(
+                    PipelineStage.QUEST,
+                    "퀘스트 생성: ${quest.title}",
+                    "${quest.category?.label ?: "-"} · ${quest.verificationMethod} · 목표 ${quest.targetValue}",
+                )
             }.onFailure { e ->
                 Log.e(TAG, "Failed to create quest", e)
+                monitor.log(PipelineStage.ERROR, "퀘스트 생성 실패", e.message)
             }
         }
     }

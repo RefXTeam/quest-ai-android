@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.HearingDisabled
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Monitor
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +54,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onOpenDebug: () -> Unit,
+    onOpenMonitor: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -120,6 +122,9 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("용사님 퀘스트") },
                 actions = {
+                    IconButton(onClick = onOpenMonitor) {
+                        Icon(Icons.Filled.Monitor, contentDescription = "파이프라인 모니터")
+                    }
                     IconButton(onClick = onOpenDebug) {
                         Icon(Icons.Filled.Insights, contentDescription = "최적화 패널")
                     }

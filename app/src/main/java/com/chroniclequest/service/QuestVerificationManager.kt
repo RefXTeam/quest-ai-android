@@ -3,6 +3,8 @@ package com.chroniclequest.service
 import android.util.Log
 import com.chroniclequest.domain.AmbientEventBus
 import com.chroniclequest.domain.AmbientSignal
+import com.chroniclequest.domain.PipelineMonitor
+import com.chroniclequest.domain.model.PipelineStage
 import com.chroniclequest.domain.model.Quest
 import com.chroniclequest.domain.model.QuestProgress
 import com.chroniclequest.domain.model.QuestState
@@ -34,6 +36,7 @@ class QuestVerificationManager @Inject constructor(
     private val completeQuest: CompleteQuestUseCase,
     private val questRepository: QuestRepository,
     private val eventBus: AmbientEventBus,
+    private val monitor: PipelineMonitor,
     screenOffVerifier: ScreenOffVerifier,
     stepCountVerifier: StepCountVerifier,
     mediaPlayVerifier: MediaPlayVerifier,
@@ -51,6 +54,11 @@ class QuestVerificationManager @Inject constructor(
         verifiers[quest.verificationMethod]?.start(quest) { id -> reportCompleted(id) }
         scheduleExpiry(quest)
         Log.d(TAG, "Armed quest #${quest.id} via ${quest.verificationMethod}")
+        monitor.log(
+            PipelineStage.VERIFY,
+            "검증 시작: ${quest.title}",
+            "${quest.verificationMethod} · 목표 ${quest.targetValue}",
+        )
     }
 
     fun disarm(questId: Long) {
@@ -82,6 +90,11 @@ class QuestVerificationManager @Inject constructor(
             disarm(questId)
             eventBus.emit(AmbientSignal.QuestCompleted(result.gainedExp, result.gainedGold))
             Log.d(TAG, "Quest #$questId verified complete")
+            monitor.log(
+                PipelineStage.REWARD,
+                "퀘스트 완료! ${result.quest.title}",
+                "+${result.gainedExp} 경험치 · +${result.gainedGold} 골드",
+            )
         }
     }
 

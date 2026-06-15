@@ -72,6 +72,7 @@ class StepCountVerifier @Inject constructor(
         if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
         val total = event.values.firstOrNull() ?: return
         latestCount = total
+        Log.d(TAG, "step counter event: total=$total")
 
         targets.values.forEach { quest ->
             val baseline = baselines[quest.id]
@@ -90,7 +91,11 @@ class StepCountVerifier @Inject constructor(
 
     private fun ensureListening() {
         if (listening || stepSensor == null) return
-        sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        // SENSOR_DELAY_UI + maxReportLatencyUs=0 disables batching so step events
+        // arrive immediately (TYPE_STEP_COUNTER otherwise batches to save power,
+        // making progress lag). on-change sensor also reports the current total once
+        // on registration, so the baseline is captured right away.
+        sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI, 0)
         listening = true
     }
 

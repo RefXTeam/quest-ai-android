@@ -1,6 +1,7 @@
 package com.chroniclequest.domain.usecase
 
 import com.chroniclequest.domain.model.Quest
+import com.chroniclequest.domain.model.QuestCategory
 import com.chroniclequest.domain.model.QuestState
 import com.chroniclequest.domain.model.VerificationMethod
 import com.chroniclequest.domain.repository.QuestRepository
@@ -26,8 +27,11 @@ class GenerateQuestFromToolCallUseCase @Inject constructor(
         val title = args.string("title")?.takeIf { it.isNotBlank() } ?: "An Unexpected Quest"
         val description = args.string("description")
             ?: "A fresh challenge has appeared on your path."
-        val method = VerificationMethod.fromOrNull(args.string("verificationMethod"))
+        // triggerDynamicQuest sends `targetSensor`; giveUserQuest sends `verificationMethod`.
+        val method = VerificationMethod.fromOrNull(args.string("targetSensor"))
+            ?: VerificationMethod.fromOrNull(args.string("verificationMethod"))
             ?: VerificationMethod.USER_MANUAL
+        val category = QuestCategory.fromOrNull(args.string("category"))
         val targetValue = args.int("targetValue").coerceAtLeast(1)
         val rewardExp = args.int("rewardExp").coerceIn(10, 100)
         val rewardGold = args.int("rewardGold").coerceIn(5, 50)
@@ -46,6 +50,7 @@ class GenerateQuestFromToolCallUseCase @Inject constructor(
             rewardGold = rewardGold,
             state = QuestState.TRIGGERED,
             createdAt = now,
+            category = category,
         )
         val id = questRepository.createTriggeredQuest(quest, summary, rawJson)
         return quest.copy(id = id)

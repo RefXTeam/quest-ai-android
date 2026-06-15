@@ -18,7 +18,11 @@ enum class VerificationMethod {
     USER_MANUAL;
 
     companion object {
-        fun fromOrNull(raw: String?): VerificationMethod? =
-            entries.firstOrNull { it.name.equals(raw?.trim(), ignoreCase = true) }
+        fun fromOrNull(raw: String?): VerificationMethod? {
+            val key = raw?.trim() ?: return null
+            // triggerDynamicQuest uses USER_CHECK for the same concept as USER_MANUAL.
+            if (key.equals("USER_CHECK", ignoreCase = true)) return USER_MANUAL
+            return entries.firstOrNull { it.name.equals(key, ignoreCase = true) }
+        }
     }
 }

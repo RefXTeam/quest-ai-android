@@ -14,6 +14,7 @@ package com.chroniclequest.domain.model
  * @param createdAt epoch millis when triggered
  * @param acceptedAt epoch millis when accepted (null until then)
  * @param deadlineAt epoch millis the verification window closes (null until accepted)
+ * @param category optional category from `triggerDynamicQuest` (null for legacy `giveUserQuest`)
  */
 data class Quest(
     val id: Long,
@@ -27,4 +28,5 @@ data class Quest(
     val createdAt: Long,
     val acceptedAt: Long? = null,
     val deadlineAt: Long? = null,
+    val category: QuestCategory? = null,
 )
