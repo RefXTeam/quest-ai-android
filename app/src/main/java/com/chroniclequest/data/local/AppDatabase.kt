@@ -10,7 +10,7 @@ import com.chroniclequest.data.local.entity.UserStatsEntity
 
 @Database(
     entities = [QuestLogEntity::class, UserStatsEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

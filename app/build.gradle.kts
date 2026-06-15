@@ -106,4 +106,5 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.accompanist.permissions)
     implementation(libs.androidx.media3.session)
+    implementation(libs.nanohttpd)
 }

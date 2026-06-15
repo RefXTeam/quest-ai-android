@@ -36,6 +36,7 @@ class AmbientAudioService : LifecycleService() {
     @Inject lateinit var vadProcessor: VadProcessor
     @Inject lateinit var ambientPipeline: AmbientPipeline
     @Inject lateinit var verificationManager: QuestVerificationManager
+    @Inject lateinit var webServer: MonitorWebServer
 
     private lateinit var audioManager: AudioManager
     private var focusRequest: AudioFocusRequest? = null
@@ -85,6 +86,7 @@ class AmbientAudioService : LifecycleService() {
         startAsForeground()
         _isRunning.value = true
         verificationManager.restoreArmed()
+        webServer.start()
         ambientPipeline.start(lifecycleScope)
         if (requestAudioFocus()) {
             hasFocus = true
@@ -148,6 +150,7 @@ class AmbientAudioService : LifecycleService() {
         stopCapture()
         abandonAudioFocus()
         ambientPipeline.stop()
+        webServer.stop()
         _isRunning.value = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -157,6 +160,7 @@ class AmbientAudioService : LifecycleService() {
         stopCapture()
         abandonAudioFocus()
         ambientPipeline.stop()
+        webServer.stop()
         _isRunning.value = false
         super.onDestroy()
     }

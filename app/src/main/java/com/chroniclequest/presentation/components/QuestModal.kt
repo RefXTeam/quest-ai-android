@@ -85,7 +85,8 @@ private fun QuestModalCard(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "⚔️  새로운 퀘스트 등장",
+                text = quest.category?.let { "⚔️  새로운 ${it.emoji} ${it.label} 퀘스트" }
+                    ?: "⚔️  새로운 퀘스트 등장",
                 style = MaterialTheme.typography.labelLarge,
                 color = QuestGold,
             )

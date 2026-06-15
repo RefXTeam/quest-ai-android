@@ -17,6 +17,7 @@ fun QuestLogEntity.toDomain(): Quest = Quest(
     createdAt = timestamp,
     acceptedAt = acceptedAt,
     deadlineAt = deadlineAt,
+    category = category,
 )
 
 fun UserStatsEntity.toDomain(): UserStats = UserStats(

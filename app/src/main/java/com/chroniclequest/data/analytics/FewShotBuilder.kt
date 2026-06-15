@@ -34,15 +34,17 @@ class FewShotBuilder @Inject constructor(
         return buildString {
             appendLine("참고: 이 사용자의 과거 반응 사례다. 성공 패턴은 살리고 실패 패턴은 피해서 더 잘 맞는 퀘스트를 제안하라.")
             success.forEach { q ->
+                val cat = q.category?.let { "(${it.label}) " }.orEmpty()
                 appendLine(
-                    "[성공] 상황: \"${q.conversationSummary}\" → 제안: \"${q.title}\" " +
+                    "[성공] ${cat}상황:\"${q.conversationSummary}\" → 제안: \"${q.title}\" " +
                         "(${q.verificationMethod}) → 사용자가 완료함",
                 )
             }
             failure.forEach { q ->
+                val cat = q.category?.let { "(${it.label}) " }.orEmpty()
                 val reaction = if (q.state == QuestState.DISMISSED) "무시함" else "시간 내에 못 해서 실패함"
                 appendLine(
-                    "[실패] 상황: \"${q.conversationSummary}\" → 제안: \"${q.title}\" " +
+                    "[실패] ${cat}상황:\"${q.conversationSummary}\" → 제안: \"${q.title}\" " +
                         "(${q.verificationMethod}) → 사용자가 $reaction",
                 )
             }

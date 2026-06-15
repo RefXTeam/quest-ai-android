@@ -16,6 +16,7 @@ kotlinxCoroutines = "1.9.0"
 datastore = "1.1.1"
 accompanistPermissions = "0.36.0"
 media3 = "1.4.1"
+nanohttpd = "2.3.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -49,6 +50,7 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanistPermissions" }
 androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+nanohttpd = { group = "org.nanohttpd", name = "nanohttpd", version.ref = "nanohttpd" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

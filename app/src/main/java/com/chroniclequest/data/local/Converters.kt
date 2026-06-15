@@ -1,6 +1,7 @@
 package com.chroniclequest.data.local
 
 import androidx.room.TypeConverter
+import com.chroniclequest.domain.model.QuestCategory
 import com.chroniclequest.domain.model.QuestState
 import com.chroniclequest.domain.model.VerificationMethod
 
@@ -18,4 +19,10 @@ class Converters {
 
     @TypeConverter
     fun toQuestState(value: String): QuestState = QuestState.valueOf(value)
+
+    @TypeConverter
+    fun fromQuestCategory(value: QuestCategory?): String? = value?.name
+
+    @TypeConverter
+    fun toQuestCategory(value: String?): QuestCategory? = value?.let { QuestCategory.valueOf(it) }
 }

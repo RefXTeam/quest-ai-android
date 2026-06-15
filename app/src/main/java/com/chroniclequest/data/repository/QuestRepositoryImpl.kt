@@ -38,6 +38,7 @@ class QuestRepositoryImpl @Inject constructor(
             rewardExp = quest.rewardExp,
             rewardGold = quest.rewardGold,
             state = QuestState.TRIGGERED,
+            category = quest.category,
         )
         return questLogDao.insert(entity)
     }

@@ -27,11 +27,13 @@
 
 ### 패키지 구조
 ```
-data/      audio(AudioRecord+VAD+WAV), remote(Gemini), local(Room), analytics, repository
-domain/    model, repository(interface), usecase, engine(cooldown/silence), AmbientEventBus
-service/   AmbientAudioService(FGS), AmbientQuestPipeline, QuestVerificationManager, verification/
-presentation/  theme, home, components, debug, narration
+data/      audio(AudioRecord+VAD+WAV), remote(Gemini), local(Room), analytics(Flywheel+FewShot), repository
+domain/    model, repository(interface), usecase, engine(cooldown/silence), AmbientEventBus, PipelineMonitor
+service/   AmbientAudioService(FGS), AmbientQuestPipeline, QuestVerificationManager, verification/,
+           MonitorWebServer(NanoHTTPD), BatteryOptimization, NetworkUtils
+presentation/  theme, home, components, debug, narration, monitor
 di/        DatabaseModule, RepositoryModule, NetworkModule, ServiceModule
+assets/    monitor.html   ·   docs/  index.html (GitHub Pages 사본)
 ```
 
 ### 빌드 환경 제약 (중요 — 그대로 따를 것)
@@ -58,33 +60,36 @@ di/        DatabaseModule, RepositoryModule, NetworkModule, ServiceModule
 LLM이 보이지 않는 배경 게임 마스터로 동작하도록 강제합니다.
 
 **시스템 프롬프트 규칙(영문 지시 + 한국어 출력)**:
-- "You are an invisible ambient RPG Game Master. The user speaks KOREAN. Do NOT speak or output audio/text directly. Only respond by calling the `giveUserQuest` or `sendInsightTip` tool when a clear lifestyle problem, emotional distress, or target behavior is detected. Prefer silence."
-- **언어 규칙**: 모든 사용자 노출 문자열(quest `title`/`description`, insight `message`)을 **자연스러운 한국어**로 작성.
-- **targetValue 단위 규칙(엄격)**: `SCREEN_OFF`=분(5~120), `STEP_COUNT`=걸음 수, `MEDIA_PLAY`/`USER_MANUAL`=1.
+- "You are an invisible ambient RPG Game Master. The user speaks KOREAN. Do NOT speak or output audio/text directly. PREFER `triggerDynamicQuest`(분류 category 포함) for any quest; `giveUserQuest` is a legacy alternative. Use `sendInsightTip` for lighter nudges. Prefer silence."
+- **언어 규칙**: 모든 사용자 노출 문자열(quest `title`/`description`, insight `message`, `contextSummary`)을 **자연스러운 한국어**로 작성.
+- **targetValue 단위 규칙(엄격)**: `SCREEN_OFF`=분(5~120), `STEP_COUNT`=걸음 수, `USER_CHECK`/`MEDIA_PLAY`/`USER_MANUAL`=1.
 
 **타이밍/필터링**:
 - `SilenceDetector`: 음성 후 **3초** 무음이면 턴 종료로 판단(말 중간 끊김 방지). `now`를 주입받아 테스트 가능하게.
-- `CooldownEngine`: LLM이 아무리 자주 호출해도 퀘스트 생성 간 **20분** 최소 간격 강제(인메모리 상태머신).
+- `CooldownEngine`: LLM이 아무리 자주 호출해도 퀘스트 생성 간 최소 간격 강제(인메모리 상태머신). 프로덕션 **20분**, 발표 데모는 **1분**(`DEFAULT_COOLDOWN_MS`).
 
-**도구 스키마**:
+**도구 스키마** — 퀘스트 함수 2개(주력 `triggerDynamicQuest` + 호환 `giveUserQuest`) + `sendInsightTip`:
 ```json
 {
-  "name": "giveUserQuest",
-  "description": "Triggered when the user encounters a real-world situation solvable via a trackable micro-action.",
+  "name": "triggerDynamicQuest",
+  "description": "유저의 상황에 맞춰 실시간으로 가변적인 RPG 미션을 동적으로 생성하고 하달한다.",
   "parameters": {
-    "title": "String (긴급하고 서사적인 RPG 퀘스트 제목)",
-    "description": "String (맥락적 근거 + 실행 가이드)",
-    "verificationMethod": "ENUM [SCREEN_OFF, STEP_COUNT, MEDIA_PLAY, USER_MANUAL]",
-    "targetValue": "Int",
+    "category": "ENUM [HEALTH, STUDY, REST, SOCIAL]",
+    "title": "String (RPG 스타일 제목)",
+    "description": "String (공감 + 행동 유도 가이드)",
+    "targetSensor": "ENUM [SCREEN_OFF, STEP_COUNT, USER_CHECK]",
+    "targetValue": "Int (분 또는 걸음 수)",
     "rewardExp": "Int (10-100)",
     "rewardGold": "Int (5-50)",
-    "contextSummary": "String (퀘스트를 유발한 당시 상황·대화의 한국어 한 줄 요약 — 피드백 학습용, required)"
+    "contextSummary": "String (당시 상황 한국어 한 줄 요약 — 피드백 학습용)"
   }
 }
 ```
-추가로 `sendInsightTip(message: String)` — 추적 불가한 가벼운 격려/통찰. `contextSummary`는
-`GenerateQuestFromToolCallUseCase`에서 `QuestLogEntity.conversation_summary`로 저장한다(없을 때만
-fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
+- `giveUserQuest`(호환): 위와 동일하나 `category` 없고 `verificationMethod` ENUM[SCREEN_OFF, STEP_COUNT, MEDIA_PLAY, USER_MANUAL] 사용 + `contextSummary`. 기존 구조 비파괴 유지.
+- `sendInsightTip(message: String)` — 추적 불가한 가벼운 격려/통찰.
+- **두 퀘스트 함수는 동일 경로로 수렴**: `GenerateQuestFromToolCallUseCase`가 `targetSensor`(우선)/`verificationMethod`를 `VerificationMethod.fromOrNull`로 파싱(**`USER_CHECK`→`USER_MANUAL` 별칭**), `category`는 `QuestCategory.fromOrNull`. `AmbientQuestPipeline.onToolCall`이 두 함수명을 같은 `handleQuestToolCall`로 라우팅.
+- `contextSummary`는 `QuestLogEntity.conversation_summary`로 저장(없을 때만 fallback) — 자가 개선(§F) few-shot의 핵심 연료.
+- **신규 enum** `domain/model/QuestCategory`(HEALTH/STUDY/REST/SOCIAL + 한국어 label/emoji). `Quest`/`QuestLogEntity`에 `category: QuestCategory? = null` 추가, Room **version 2**(`fallbackToDestructiveMigration`) + Converter.
 
 **AI 전송 방식 — 두 가지 트랜스포트(반드시 둘 다 구현)**:
 - `GeminiLiveClient` (WebSocket): `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=...` 로 연결, 첫 프레임 `setup`(model, systemInstruction, tools, responseModalities=TEXT), 이후 `realtimeInput.mediaChunks`로 base64 PCM 스트리밍, 서버 `toolCall.functionCalls` 파싱.
@@ -98,7 +103,7 @@ fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
 ### C. 센서 검증 & 퀘스트 상태머신 (service/verification)
 `QuestVerificationManager`가 `verificationMethod`에 따라 검증기를 디스패치:
 1. `SCREEN_OFF`: `ACTION_SCREEN_OFF`/`ON` `BroadcastReceiver` 등록, 화면 꺼짐 후 목표 분만큼 유지 시 완료(중간에 켜지면 카운트다운 취소).
-2. `STEP_COUNT`: `Sensor.TYPE_STEP_COUNTER` `SensorEventListener`, 무장 시점 기준 델타가 목표 도달 시 완료.
+2. `STEP_COUNT`: `Sensor.TYPE_STEP_COUNTER` `SensorEventListener`, 무장 시점 기준 델타가 목표 도달 시 완료. **`registerListener(.., SENSOR_DELAY_UI, maxReportLatencyUs=0)`로 배치를 꺼 걸음 즉시 반영**(기본 배치 시 진행도 지연 버그).
 3. `MEDIA_PLAY`: `AudioManager.isMusicActive` 폴링(권한 불필요한 프록시; 더 풍부한 `MediaSessionManager`는 알림 접근 권한 필요 — 후속 과제로 주석 명시).
 4. `USER_MANUAL`: 인앱 체크인 버튼으로 완료.
 
@@ -112,6 +117,7 @@ fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
 3. **퀘스트 트리거**: 도구 호출 수신 시 **햅틱** + 입·퇴장 애니메이션이 있는 정교한 모달(`QuestModal`) 표시. 버튼: "퀘스트 수락" / "나중에".
 4. **성공 애니메이션**: 퀘스트가 `COMPLETED`되면 Jetpack Compose **Canvas 파티클 폭발(XP 컨페티)** + 경험치 바 채워지는 애니메이션. (이 환경엔 `Math.random`/`Date.now`가 없으니 인덱스 기반 결정적 분산 사용.)
 5. **진행도 & 유효시간**: 수락(ACCEPTED)한 퀘스트 카드에 실시간 상태 표시. `HomeViewModel`에 1초 ticker `flow{ while(true){ emit(now); delay(1000) } }`를 `combine`에 추가하고, 각 퀘스트를 `QuestUiModel(quest, remainingMillis, windowMillis, progress)`로 매핑(`SharingStarted.WhileSubscribed`라 화면 보일 때만 틱). 카드에는 **진행 바**(`progressOf`로 얻은 `QuestProgress.fraction`) + "N걸음/M걸음 · P%"와 **남은 시간 카운트다운**(`deadlineAt - now`, >1시간이면 "H시간 M분", 5분 미만 강조)을 표시. SCREEN_OFF는 "화면을 켜면 진행이 초기화돼요" 안내.
+6. **카테고리 배지**: `quest.category != null`이면 카드/모달에 카테고리 배지(이모지+라벨+색) 표시. null(=giveUserQuest)이면 미표시(비파괴).
 
 ### E. 피드백 플라이휠 & 최적화 (data/analytics)
 1. **Room 스키마**: `QuestLogEntity`(id, timestamp, conversation_summary, generated_quest_json, title, description, verificationMethod, targetValue, rewardExp, rewardGold, **user_reaction_state** ENUM[TRIGGERED, ACCEPTED, DISMISSED, EXPIRED, COMPLETED], acceptedAt, deadlineAt) — 라이브 퀘스트 저장소이자 플라이휠 로그를 겸함. `UserStatsEntity`(level/totalExp/gold 단일 행).
@@ -127,6 +133,14 @@ fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
    [실패] 상황: "{summary}" → 제안: "{title}" ({method}) → 사용자가 무시함
    ```
 2. `AmbientQuestPipeline.evaluateTurn`에서 매 턴 평가 직전 `fewShotBuilder.build()`를 호출해 `GeminiRestClient.evaluateTurn(..., fewShot)`로 전달 → `GeminiAgentConfig.systemInstruction(fewShot)`가 시스템 프롬프트 뒤에 append.
+
+### G. 실시간 파이프라인 모니터 (발표용)
+데이터 흐름을 웹페이지/앱에서 실시간으로 보여준다.
+1. **신규** `domain/PipelineMonitor`(`@Singleton`): `StateFlow<List<PipelineEvent>>`(최근 200개) + `log(stage, message, detail)` + `clear()`. **신규** `domain/model/PipelineEvent`(@Serializable) + `PipelineStage` enum(@Serializable, 한국어 label/emoji): LISTENING/TURN/AI_REQUEST/AI_RESPONSE/TOOL_CALL/COOLDOWN/QUEST/VERIFY/REWARD/ERROR.
+2. **emit 지점**: `AmbientQuestPipeline`(start→LISTENING, 침묵 턴→TURN, 요청→AI_REQUEST, 응답→AI_RESPONSE, toolcall→TOOL_CALL, 쿨다운→COOLDOWN, 생성→QUEST, 실패→ERROR), `QuestVerificationManager`(arm→VERIFY, 완료→REWARD).
+3. **신규** `service/MonitorWebServer`(NanoHTTPD, 포트 8080): `GET /`→assets/monitor.html, `GET /events.json`→`PipelineMonitor.events` 직렬화(CORS `*`). `AmbientAudioService` 시작/중지 시 `start()/stop()`. NanoHTTPD 의존성 추가.
+4. **신규** `app/src/main/assets/monitor.html` — 1초 폴링(`/events.json`), 단계별 색/이모지 다크 콘솔 타임라인. 같은 파일을 [`docs/index.html`](docs/index.html)로 복사해 GitHub Pages 배포(폰 IP 입력 필드 포함; HTTPS→HTTP mixed-content로 Pages에선 직접 연결 제한 → 실시간 메인은 폰 IP 직접 접속).
+5. **신규** `presentation/monitor/MonitorScreen` + `MonitorViewModel`(`PipelineMonitor` 구독) — 앱 내 동일 타임라인 + 웹 주소(`http://<wifi-ip>:8080`, `NetworkUtils.localIpv4()`) 안내. 홈 상단 📺 아이콘 → 네비게이션.
 
 ---
 
@@ -165,6 +179,8 @@ fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
 5. **진행도/유효시간**: 수락한 퀘스트 카드에 진행 바·"N걸음/M걸음 P%"·"남은 시간"이 매초 갱신되는지(카운트다운 감소) 확인.
 6. **백그라운드**: 에이전트 시작 후 홈으로 보내고 화면 off → 프로세스/FGS 알림 생존, 배터리 화이트리스트 등록(`dumpsys deviceidle whitelist | grep`) 확인. 음악 재생 중에도 캡처 유지.
 7. **자가 개선(few-shot)**: 실패 사례(예: "업무 중 맛집 제안=무시")를 시스템 프롬프트에 넣고 비슷한 상황 입력 시 그 패턴을 피하는지 텍스트 입력으로 A/B 확인.
+8. **만능 함수**: 앱과 동일 요청에 `triggerDynamicQuest`를 넣어 모델이 `category`/`targetSensor`/단위 정확히 반환하는지 확인(USER_CHECK→USER_MANUAL 매핑).
+9. **발표 모니터**: 에이전트 시작 후 같은 Wi-Fi(또는 폰 핫스팟)에서 `curl http://<폰IP>:8080/events.json` → HTTP 200 + 한국어 이벤트, 브라우저로 `http://<폰IP>:8080` → 실시간 타임라인. 앱 모니터 화면(📺)에 주소 표시.
 
 ---
 
@@ -175,3 +191,5 @@ fallback). 이것이 자가 개선(§6) few-shot의 핵심 연료다.
 - API 키는 `?key=`(URL)보다 **`x-goog-api-key` 헤더**가 안전(로그 노출 방지). REST/WebSocket 모두 헤더 지원.
 - 삼성 등 OEM은 FGS도 죽일 수 있어 **배터리 최적화 제외**가 백그라운드 상시 감지에 필수.
 - 무료 티어는 오디오 입력 요청 시 레이트 리밋(`429`)에 빨리 도달하니, few-shot 효과 A/B는 텍스트 입력으로 가볍게 검증.
+- `TYPE_STEP_COUNTER`는 전력 절약을 위해 이벤트를 **배치**해 진행도가 지연된다 → `maxReportLatencyUs=0`로 끌 것.
+- 발표/실기기 무선 디버깅·웹 모니터는 **기기 간 통신 가능한 네트워크** 필요. 회사/게스트망은 AP isolation으로 막히니 **휴대폰 핫스팟** 권장. GitHub Pages(HTTPS)→폰(HTTP)은 mixed-content로 막혀 폰 IP 직접 접속이 메인.

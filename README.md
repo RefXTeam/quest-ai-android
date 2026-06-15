@@ -7,20 +7,28 @@
 
 퀘스트가 등장하면 신뢰감 있는 한국어 여성 목소리가 **"용사님…"** 하고 읽어줍니다.
 
+<p align="center">
+  <img src="docs/images/home.png" width="30%" alt="홈 화면" />
+  <img src="docs/images/quest-progress.png" width="30%" alt="진행도/유효시간" />
+  <img src="docs/images/monitor.png" width="30%" alt="실시간 파이프라인 모니터" />
+</p>
+<p align="center"><sub>홈(HUD) · 진행도/남은시간 · 실시간 파이프라인 모니터</sub></p>
+
 ---
 
 ## 주요 기능
 
 - 🎙️ **항상 켜진 주변 음성 캡처** — `microphone` 포그라운드 서비스, 백그라운드/화면 off에서도 유지
 - 🔊 **로컬 RMS/VAD 게이트** — 음성 구간만 전송해 대역폭·토큰 절약
-- 🧠 **Gemini 함수 호출** — 라이프스타일 문제·감정을 감지해 `giveUserQuest` / `sendInsightTip` 호출
-- ⏱️ **3초 침묵 턴 종료 + 20분 쿨다운** — 말 중간 끊김 방지, 과도한 퀘스트 억제
+- 🧠 **Gemini 함수 호출** — `triggerDynamicQuest`(만능 동적 함수, category 포함) / `giveUserQuest` / `sendInsightTip`
+- ⏱️ **3초 침묵 턴 종료 + 쿨다운** — 말 중간 끊김 방지, 과도한 퀘스트 억제(데모 1분 · 프로덕션 20분)
 - 🎮 **Material 3 다크 RPG UI** — 레벨/경험치 바/골드 HUD, 퀘스트 모달, Canvas 컨페티
-- 📈 **진행도 & 유효시간** — 수락한 퀘스트의 진행 바(걸음/화면끔)·남은 시간 카운트다운을 매초 표시
-- 📱 **센서 검증** — 화면 끄기 / 걸음 수 / 미디어 재생 / 직접 인증
+- 📈 **진행도 & 유효시간** — 진행 바(걸음/화면끔)·남은 시간 카운트다운을 매초 표시
+- 📱 **센서 검증** — 화면 끄기 / 걸음 수 / 미디어 재생 / 직접 인증 (걸음수 **실시간 반영**)
 - 🗣️ **TTS 음성 안내** — 한국어 여성 목소리로 퀘스트 낭독, 액션 시 중단
 - 🔋 **백그라운드 상시 감지** — 배터리 최적화 제외 + 미디어 재생 중에도 캡처 유지(통화만 일시정지)
 - 🔁 **온디바이스 자가 개선** — 사용자 본인의 성공/실패 사례를 시스템 프롬프트에 few-shot으로 주입
+- 📊 **실시간 파이프라인 모니터(발표용)** — 앱 내장 웹서버로 데이터 흐름을 브라우저/앱에서 실시간 관찰
 - 🇰🇷 **전체 한국어** — UI와 AI가 생성하는 퀘스트 모두 한국어
 
 ---
@@ -41,14 +49,14 @@ flowchart TD
     Eval --> FS["FewShotBuilder<br/>(과거 성공/실패 사례)"]
     Wav --> Rest["GeminiRestClient<br/>generateContent (gemini-2.5-flash)"]
     FS -.->|"시스템 프롬프트 주입"| Rest
-    Rest -->|"functionCall<br/>(+contextSummary)"| Cool{"CooldownEngine<br/>20분 경과?"}
+    Rest -->|"functionCall<br/>(triggerDynamicQuest/giveUserQuest)"| Cool{"CooldownEngine<br/>쿨다운 경과?"}
     Cool -->|"아니오"| Drop["억제 (퀘스트 생성 안 함)"]
     Cool -->|"예"| Gen["GenerateQuestFromToolCallUseCase"]
 
     Gen --> Room[("Room: quest_log<br/>state = TRIGGERED")]
     Room -.->|"성공/실패 학습"| FS
     Room --> VM["HomeViewModel<br/>(StateFlow + 1초 ticker)"]
-    VM --> Modal["QuestModal 등장<br/>+ 햅틱"]
+    VM --> Modal["QuestModal 등장<br/>+ 햅틱 + 카테고리 배지"]
     Modal --> TTS["QuestNarrator<br/>🗣️ '용사님…'"]
 
     Modal -->|"수락"| Arm["QuestVerificationManager.arm()"]
@@ -58,6 +66,12 @@ flowchart TD
     Verify -->|"목표 달성"| Done["state = COMPLETED<br/>보상 지급"]
     Verify -->|"기한 초과"| Exp["state = EXPIRED"]
     Done --> Conf["🎉 컨페티 + 경험치 애니메이션"]
+
+    Eval -.->|"각 단계 emit"| Mon["PipelineMonitor"]
+    Verify -.-> Mon
+    Done -.-> Mon
+    Mon --> WebSrv["MonitorWebServer :8080"]
+    WebSrv --> Clients["발표 PC 브라우저 + 앱 모니터 화면"]
 ```
 
 ## 퀘스트 생명주기 (시퀀스)
@@ -81,7 +95,7 @@ sequenceDiagram
     DB-->>F: 사례 목록
     F-->>P: few-shot 블록
     P->>G: WAV + 시스템 프롬프트(+few-shot) + tools
-    G-->>P: giveUserQuest(한국어 title/desc + contextSummary)
+    G-->>P: triggerDynamicQuest(category + 한국어 + contextSummary)
     Note over P: 쿨다운 통과 시에만
     P->>DB: 퀘스트 저장 (TRIGGERED, 맥락 포함)
     DB-->>UI: StateFlow 갱신 → 모달 + TTS 낭독
@@ -121,13 +135,13 @@ flowchart LR
         Home["HomeScreen / ViewModel"]
         Comp["components<br/>HUD · QuestModal · Confetti · 진행바"]
         Narr["QuestNarrator (TTS)"]
-        Debug["OptimizationPanel"]
+        Mon["MonitorScreen · OptimizationPanel"]
     end
     subgraph D["domain"]
         direction TB
-        Model["model · usecase<br/>(QuestProgress 등)"]
+        Model["model · usecase<br/>(QuestProgress · QuestCategory · PipelineEvent)"]
         Eng["engine<br/>Silence · Cooldown"]
-        Repo["repository (interface)"]
+        Bus["PipelineMonitor · AmbientEventBus"]
     end
     subgraph DA["data"]
         direction TB
@@ -138,14 +152,15 @@ flowchart LR
     end
     subgraph SV["service"]
         direction TB
-        Svc["AmbientAudioService<br/>+ BatteryOptimization"]
+        Svc["AmbientAudioService + BatteryOptimization"]
         Pipe["AmbientQuestPipeline"]
-        Verif["VerificationManager + 검증기(진행도 노출)"]
+        Verif["VerificationManager + 검증기"]
+        Web["MonitorWebServer (NanoHTTPD)"]
     end
 
     P --> D
     SV --> D
-    DA -.-> Repo
+    DA -.-> D
     P -.->|Hilt DI| DA
     SV --> DA
 ```
@@ -157,7 +172,7 @@ flowchart LR
 - **Kotlin · Jetpack Compose** (Material 3, 다크 RPG 테마)
 - **Clean Architecture** (`data` / `domain` / `presentation` / `service`) + **MVI**
 - **Hilt** DI · **Room** (KSP) · **Coroutines/Flow**
-- **OkHttp** (REST + WebSocket) · **kotlinx.serialization**
+- **OkHttp** (REST + WebSocket) · **kotlinx.serialization** · **NanoHTTPD**(모니터 웹서버)
 - 단일 모듈 `app`, 패키지 루트 `com.chroniclequest`
 
 ### 주요 구성요소
@@ -166,86 +181,111 @@ flowchart LR
 |--------|-------------|
 | `data/audio` | `AudioCaptureManager`, `VadProcessor`, `WavEncoder`, `PcmUtils` |
 | `data/remote` | `GeminiRestClient`(기본), `GeminiLiveClient`(WebSocket), `GeminiAgentConfig` |
-| `data/local` | `AppDatabase`, `QuestLogEntity`(라이브 퀘스트 + 플라이휠 로그 겸용) |
+| `data/local` | `AppDatabase`(v2), `QuestLogEntity`(라이브 퀘스트 + 플라이휠 로그 겸용) |
 | `data/analytics` | `FlywheelExporter`(JSON 내보내기), `FewShotBuilder`(런타임 프롬프트 주입) |
-| `domain/model` | `Quest`, `QuestProgress`, `QuestState`, `UserStats` |
-| `domain/engine` | `SilenceDetector`(3초), `CooldownEngine`(20분) |
-| `domain/usecase` | 퀘스트 생성 / 수락 / 완료 |
-| `service` | `AmbientAudioService`(FGS), `AmbientQuestPipeline`, `QuestVerificationManager` + 검증기, `BatteryOptimization` |
-| `presentation` | `HomeScreen`, `components`(진행 바 포함), `QuestNarrator`(TTS), `OptimizationPanelScreen` |
+| `domain/model` | `Quest`, `QuestProgress`, `QuestCategory`, `QuestState`, `PipelineEvent`, `UserStats` |
+| `domain` | `PipelineMonitor`(모니터 이벤트 버스), `AmbientEventBus` |
+| `domain/engine` | `SilenceDetector`(3초), `CooldownEngine`(쿨다운) |
+| `service` | `AmbientAudioService`, `AmbientQuestPipeline`, `QuestVerificationManager` + 검증기, `MonitorWebServer`, `BatteryOptimization` |
+| `presentation` | `HomeScreen`, `MonitorScreen`, `components`, `QuestNarrator`(TTS), `OptimizationPanelScreen` |
 
 ---
 
-## AI 트랜스포트 — 두 가지 경로
+## AI 함수 (Tool Calling)
+
+| 함수 | 용도 |
+|------|------|
+| **`triggerDynamicQuest`** (주력) | 만능 동적 퀘스트 — `category`(HEALTH/STUDY/REST/SOCIAL) + `targetSensor`(SCREEN_OFF/STEP_COUNT/USER_CHECK) + title/description/targetValue/reward/contextSummary |
+| `giveUserQuest` (호환) | 기존 동적 함수(category 없음). `verificationMethod` 사용 |
+| `sendInsightTip` | 추적 불가한 가벼운 격려/통찰 |
+
+> 두 퀘스트 함수는 **동일한 생성 경로**(`GenerateQuestFromToolCallUseCase` → Room → `QuestVerificationManager`)로 수렴합니다.
+> `targetSensor`의 `USER_CHECK`는 내부 `USER_MANUAL`로 매핑됩니다.
+
+### AI 트랜스포트 — 두 가지 경로
 
 | 경로 | 사용 시점 | 동작 |
 |------|-----------|------|
-| **REST 폴백** (기본) | Live 권한 없는 키 | 3초 침묵마다 누적 음성을 **WAV 한 클립**으로 `generateContent`(`gemini-2.5-flash`)에 전송 → 함수 호출 파싱 |
+| **REST 폴백** (기본) | Live 권한 없는 키 | 3초 침묵마다 누적 음성을 **WAV 한 클립**으로 `generateContent`(`gemini-2.5-flash`)에 전송 |
 | **Live (WebSocket)** | Live(`bidiGenerateContent`) 권한 있는 키 | base64 PCM 실시간 스트리밍, 서버 `toolCall` 수신 |
 
-> 대부분의 Gemini 키는 Live API가 비활성(`1008` 거부)이라 **REST 폴백을 기본 경로**로 둡니다.
-> 두 경로는 동일한 시스템 프롬프트·tool 스키마·쿨다운·퀘스트 로직을 공유하며, API 키는 URL이 아닌
-> **`x-goog-api-key` 헤더**로 전달해 로그 노출을 막습니다.
+> 대부분의 Gemini 키는 Live API가 비활성(`1008` 거부)이라 **REST 폴백이 기본 경로**입니다. API 키는 URL이
+> 아닌 **`x-goog-api-key` 헤더**로 전달해 로그 노출을 막습니다.
 
-## 진행도 & 유효시간
+---
 
-수락한 퀘스트는 카드에서 실시간 상태를 보여줍니다.
+## 실시간 파이프라인 모니터 (발표용)
 
-- **진행 바** — `QuestVerifier.progress(now)`가 노출하는 값(`StepCountVerifier` 걸음 델타,
-  `ScreenOffVerifier` 연속 화면끔 시간)을 `QuestVerificationManager.progressOf()`로 모아 표시
-  ("N걸음 / M걸음 · P%").
-- **남은 유효시간** — `Quest.deadlineAt` 기준 카운트다운("남은 시간 1시간 36분", 5분 미만이면 강조).
-- `HomeViewModel`의 1초 ticker가 `QuestUiModel`을 매초 재계산해 카운트다운·진행을 갱신합니다.
+데이터 흐름(음성 → Gemini → 퀘스트)을 **웹페이지/앱에서 실시간**으로 볼 수 있습니다.
+
+- **`PipelineMonitor`** — 각 단계(감지 → 턴 종료 → AI 요청 → AI 응답 → 함수 호출 → 쿨다운 →
+  퀘스트 생성 → 검증 → 보상)가 이벤트를 emit하는 전역 버스.
+- **`MonitorWebServer`**(NanoHTTPD, 포트 **8080**) — 에이전트 시작 시 자동 기동. `monitor.html` 서빙 +
+  `/events.json` 피드(CORS 개방).
+- **웹 페이지** — `app/src/main/assets/monitor.html`(앱 서빙) + [`docs/index.html`](docs/index.html)(GitHub Pages 사본).
+  1초 폴링, 단계별 색/이모지 타임라인.
+- **앱 내 `MonitorScreen`** — 동일 타임라인 + 웹 모니터 주소(`http://<폰IP>:8080`) 안내.
+
+### 발표 사용법
+1. 폰: 앱 실행 → **에이전트 시작** (웹서버 자동 기동)
+2. 앱 **모니터 화면**(홈 상단 📺 아이콘)에 표시되는 `http://<폰IP>:8080` 확인
+3. **발표 PC 브라우저**에서 그 주소 접속 → 실시간 타임라인
+4. 말을 걸면 폰·웹 양쪽에 단계별 이벤트가 흐름. **쿨다운 1분**(데모)이라 빠른 반복 시연 가능
+
+> ⚠️ 같은 Wi-Fi(기기 간 통신 허용)가 필요합니다. 회사/게스트망은 기기 격리(AP isolation)로 막힐 수
+> 있으니 **휴대폰 핫스팟**을 쓰면 확실합니다. GitHub Pages(HTTPS)에서 폰(HTTP)으로의 직접 연결은
+> 브라우저 mixed-content 정책상 막히므로, 실시간 메인은 **폰 IP 직접 접속**입니다.
+
+---
 
 ## 퀘스트 검증 방식
 
 | 메서드 | 검증 방법 |
 |--------|-----------|
 | `SCREEN_OFF` | `BroadcastReceiver`(화면 on/off) — N분간 화면 꺼짐 유지 |
-| `STEP_COUNT` | `TYPE_STEP_COUNTER` 델타 — 시작 기준 N걸음 |
+| `STEP_COUNT` | `TYPE_STEP_COUNTER` 델타 — `maxReportLatency=0`로 **걸음 즉시 반영** |
 | `MEDIA_PLAY` | `AudioManager.isMusicActive` 폴링 (`MediaSessionManager`는 알림 접근 권한 필요 — 후속 과제) |
-| `USER_MANUAL` | 인앱 체크인 버튼 |
+| `USER_MANUAL` / `USER_CHECK` | 인앱 체크인 버튼 |
+
+진행도는 `QuestVerifier.progress(now)` → `QuestVerificationManager.progressOf()` → `HomeViewModel`의
+1초 ticker → 카드 진행 바·남은시간으로 표시됩니다.
 
 ## 자가 개선 루프 (플라이휠 → few-shot)
 
 외부 서버 없이, 사용자 본인의 데이터로 에이전트가 점점 더 잘 맞춰집니다.
 
-1. **연료 수집** — `giveUserQuest`가 `contextSummary`(당시 상황 한국어 요약)를 함께 반환해
+1. **연료 수집** — 퀘스트 함수가 `contextSummary`(당시 상황 한국어 요약)를 함께 반환해
    `QuestLogEntity.conversation_summary`에 저장. 반응(수락/완료/무시/만료)도 상태로 기록.
-2. **런타임 주입** — 매 턴 평가 직전 `FewShotBuilder`가 성공(COMPLETED)·실패(DISMISSED/EXPIRED)
-   사례를 추려 한국어 few-shot 블록으로 만들어 `GeminiAgentConfig.systemInstruction(fewShot)`에 주입.
-3. **오프라인 분석** — `OptimizationPanelScreen`이 `FlywheelExporter` JSON을 복사/공유(오프라인 튜닝용).
+2. **런타임 주입** — 매 턴 평가 직전 `FewShotBuilder`가 성공·실패 사례를 추려 한국어 few-shot 블록으로
+   만들어 `GeminiAgentConfig.systemInstruction(fewShot)`에 주입.
+3. **오프라인 분석** — `OptimizationPanelScreen`이 `FlywheelExporter` JSON을 복사/공유.
 
 ```
 참고: 이 사용자의 과거 반응 사례다. 성공 패턴은 살리고 실패 패턴은 피하라.
-[성공] 상황: "폰을 오래 봐서 눈이 피곤하다고 함" → 제안: "화면 끄고 휴식" (SCREEN_OFF) → 완료함
-[실패] 상황: "업무 마감으로 바쁘게 집중하던 중" → 제안: "맛집 탐방" (USER_MANUAL) → 무시함
+[성공] (휴식) 상황: "폰을 오래 봐서 눈이 피곤하다고 함" → 제안: "화면 끄고 휴식" (SCREEN_OFF) → 완료함
+[실패] (소셜) 상황: "업무 마감으로 바쁘게 집중하던 중" → 제안: "맛집 탐방" (USER_MANUAL) → 무시함
 ```
 
 ## 백그라운드 상시 감지
 
-- **포그라운드 서비스**(`type=microphone`)로 앱이 백그라운드로 가거나 화면을 꺼도 캡처 유지.
-- **배터리 최적화 제외**(`BatteryOptimization`) — 시작 시 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`로
-  사용자에게 제외를 요청해 삼성 등 공격적 OEM 배터리 관리에서도 FGS 생존.
-- **오디오 포커스 정책** — 다른 앱의 미디어 재생(`AUDIOFOCUS_LOSS`)에는 캡처를 멈추지 않고, 통화 등
-  일시 점유(`AUDIOFOCUS_LOSS_TRANSIENT`)에만 잠깐 멈췄다 종료 시 재개. 프로세스 재시작 시
-  `restoreArmed()`로 진행 중 퀘스트 검증을 복원.
+- **포그라운드 서비스**(`type=microphone`)로 앱이 백그라운드/화면 off에서도 캡처 유지.
+- **배터리 최적화 제외**(`BatteryOptimization`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)로 OEM 배터리 킬러 대응.
+- **오디오 포커스 정책** — 미디어 재생(`AUDIOFOCUS_LOSS`)엔 캡처 유지, 통화(`LOSS_TRANSIENT`)만 일시정지.
+  프로세스 재시작 시 `restoreArmed()`로 진행 중 퀘스트 검증 복원.
 
 ---
 
 ## 설정 & 빌드
 
-> **JDK 주의**: Android Gradle Plugin은 JDK 25를 지원하지 않습니다. 데몬을 **Corretto 21**로
-> 고정하기 위해 [`gradle.properties`](gradle.properties)의 `org.gradle.java.home`을 사용합니다
-> (Java 17 바이트코드 컴파일). 경로가 다르면 수정하세요.
+> **JDK 주의**: Android Gradle Plugin은 JDK 25를 지원하지 않습니다. [`gradle.properties`](gradle.properties)의
+> `org.gradle.java.home`으로 데몬을 **Corretto 21**에 고정합니다(Java 17 바이트코드). 경로가 다르면 수정하세요.
 
 1. git-ignore된 `local.properties`에 키 입력:
    ```properties
    sdk.dir=/path/to/Android/sdk
    GEMINI_API_KEY=your_key_here
    ```
-   키는 <https://aistudio.google.com/apikey> 에서 발급. 키가 없어도 빌드·실행되며, 에이전트는
-   안내만 띄우고 대기합니다.
+   키는 <https://aistudio.google.com/apikey> 에서 발급. 키가 없어도 빌드·실행됩니다(에이전트는 대기).
 
 2. 빌드 / 설치:
    ```bash
@@ -256,8 +296,8 @@ flowchart LR
 3. 실행 → **`에이전트 시작`** → 마이크·알림·배터리 최적화 제외 허용 → 주변을 말하면 약 3초 침묵 후
    퀘스트가 등장하고 TTS가 낭독합니다.
 
-> 💡 퀘스트는 20분 쿨다운이 있지만 인메모리이므로, 앱을 **완전 종료 후 재실행**하면 초기화되어
-> 바로 재테스트할 수 있습니다.
+> 💡 데모용 쿨다운은 **1분**(`CooldownEngine.DEFAULT_COOLDOWN_MS`)입니다. 프로덕션은 20분으로
+> 되돌리세요. 인메모리라 앱을 완전 종료 후 재실행하면 쿨다운이 초기화됩니다.
 
 ---
 

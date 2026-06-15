@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>용사님 퀘스트 — 실시간 파이프라인 모니터</title>
+<style>
+  :root{
+    --bg:#0B0E1A; --panel:#121627; --surface:#1A1F36; --variant:#242B49;
+    --cyan:#00E5FF; --purple:#7C4DFF; --gold:#FFC542; --emerald:#22E0A1;
+    --crimson:#FF4D6D; --text:#EAF0FF; --muted:#9AA6C7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#161B30,var(--bg));
+    color:var(--text);font-family:-apple-system,'Segoe UI',Roboto,'Noto Sans KR',sans-serif;min-height:100vh}
+  header{position:sticky;top:0;backdrop-filter:blur(8px);background:rgba(11,14,26,.82);
+    border-bottom:1px solid var(--variant);padding:16px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:18px;margin:0;font-weight:800;letter-spacing:.3px}
+  h1 .spark{color:var(--cyan)}
+  .status{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);margin-left:auto}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--crimson);box-shadow:0 0 10px var(--crimson)}
+  .dot.on{background:var(--emerald);box-shadow:0 0 10px var(--emerald)}
+  .host{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .host input{background:var(--surface);border:1px solid var(--variant);color:var(--text);
+    border-radius:8px;padding:6px 9px;font-size:12px;width:160px;outline:none}
+  .host button{background:var(--cyan);color:#06121a;border:0;border-radius:8px;padding:6px 12px;
+    font-weight:700;font-size:12px;cursor:pointer}
+  .wrap{max-width:860px;margin:0 auto;padding:18px 16px 60px}
+  .stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .stat{background:var(--surface);border:1px solid var(--variant);border-radius:12px;padding:10px 14px;font-size:13px}
+  .stat b{font-size:18px;display:block;color:var(--cyan)}
+  .timeline{display:flex;flex-direction:column;gap:10px}
+  .ev{display:flex;gap:13px;background:var(--surface);border:1px solid var(--variant);
+    border-left:4px solid var(--muted);border-radius:12px;padding:12px 14px;animation:slide .3s ease}
+  @keyframes slide{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+  .ev .emoji{font-size:22px;line-height:1.2}
+  .ev .body{flex:1;min-width:0}
+  .ev .top{display:flex;align-items:baseline;gap:8px}
+  .ev .stage{font-weight:800;font-size:13px}
+  .ev .time{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .ev .msg{margin-top:3px;font-size:15px;color:var(--text);word-break:break-word}
+  .ev .detail{margin-top:3px;font-size:13px;color:var(--muted);word-break:break-word}
+  .empty{color:var(--muted);text-align:center;padding:60px 0;font-size:15px}
+  .note{color:var(--muted);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="spark">⚔️</span> 용사님 퀘스트 — 실시간 파이프라인 모니터</h1>
+  <div class="host">
+    <span>폰 주소</span>
+    <input id="host" placeholder="예: 10.36.125.17:8080" />
+    <button id="connect">연결</button>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">연결 대기</span></div>
+</header>
+<div class="wrap">
+  <div class="stat-row">
+    <div class="stat">이벤트 <b id="count">0</b></div>
+    <div class="stat">최근 단계 <b id="last">—</b></div>
+    <div class="stat">소스 <b id="src" style="font-size:13px">—</b></div>
+  </div>
+  <div class="timeline" id="timeline"></div>
+  <div class="empty" id="empty">에이전트를 시작하고 말을 걸면 파이프라인 이벤트가 실시간으로 흐릅니다.</div>
+  <div class="note" id="mixedNote"></div>
+</div>
+<script>
+const STAGES = {
+  LISTENING:{label:'감지',emoji:'🎙️',color:'#00E5FF'},
+  TURN:{label:'턴 종료',emoji:'⏸️',color:'#9AA6C7'},
+  AI_REQUEST:{label:'AI 요청',emoji:'📤',color:'#7C4DFF'},
+  AI_RESPONSE:{label:'AI 응답',emoji:'📥',color:'#7C4DFF'},
+  TOOL_CALL:{label:'함수 호출',emoji:'⚡',color:'#FFC542'},
+  COOLDOWN:{label:'쿨다운',emoji:'⏳',color:'#9AA6C7'},
+  QUEST:{label:'퀘스트 생성',emoji:'⚔️',color:'#22E0A1'},
+  VERIFY:{label:'검증',emoji:'🎯',color:'#00E5FF'},
+  REWARD:{label:'보상',emoji:'🎉',color:'#22E0A1'},
+  ERROR:{label:'오류',emoji:'⚠️',color:'#FF4D6D'},
+};
+const $=(id)=>document.getElementById(id);
+const seen=new Set(); let total=0;
+
+function baseUrl(){
+  const saved=localStorage.getItem('cqHost');
+  if(saved) return 'http://'+saved;
+  return location.origin; // 폰에서 직접 서빙하면 자동
+}
+function fmtTime(ms){const d=new Date(ms);const p=(n)=>String(n).padStart(2,'0');
+  return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+
+function addEvent(e){
+  const key=e.timestamp+'|'+e.stage+'|'+e.message;
+  if(seen.has(key)) return; seen.add(key);
+  const s=STAGES[e.stage]||{label:e.stage,emoji:'•',color:'#9AA6C7'};
+  const el=document.createElement('div');
+  el.className='ev'; el.style.borderLeftColor=s.color;
+  el.innerHTML=`<div class="emoji">${s.emoji}</div><div class="body">
+    <div class="top"><span class="stage" style="color:${s.color}">${s.label}</span>
+    <span class="time">${fmtTime(e.timestamp)}</span></div>
+    <div class="msg">${escapeHtml(e.message)}</div>
+    ${e.detail?`<div class="detail">${escapeHtml(e.detail)}</div>`:''}</div>`;
+  $('timeline').prepend(el);
+  total++; $('count').textContent=total; $('last').textContent=s.emoji+' '+s.label;
+  $('empty').style.display='none';
+}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function setConn(ok){$('dot').className='dot'+(ok?' on':'');$('statusText').textContent=ok?'연결됨':'연결 끊김';}
+
+async function poll(){
+  const base=baseUrl();
+  $('src').textContent=base.replace(/^https?:\/\//,'');
+  try{
+    const r=await fetch(base+'/events.json',{cache:'no-store'});
+    const events=await r.json();
+    events.forEach(addEvent);
+    setConn(true);
+  }catch(err){ setConn(false); }
+}
+$('connect').onclick=()=>{const v=$('host').value.trim();
+  if(v){localStorage.setItem('cqHost',v);} else {localStorage.removeItem('cqHost');}
+  seen.clear(); total=0; $('count').textContent=0; $('timeline').innerHTML=''; $('empty').style.display='block'; poll();};
+$('host').value=localStorage.getItem('cqHost')||'';
+
+// HTTPS(GitHub Pages)에서 HTTP 폰 접속은 브라우저가 막음 — 안내
+if(location.protocol==='https:'){
+  $('mixedNote').textContent='⚠️ HTTPS 페이지(GitHub Pages)에서는 보안 정책상 폰의 HTTP 서버에 직접 연결되지 않습니다. 발표 시에는 폰 IP(http://폰주소:8080)로 직접 접속하세요.';
+}
+setInterval(poll,1000); poll();
+</script>
+</body>
+</html>

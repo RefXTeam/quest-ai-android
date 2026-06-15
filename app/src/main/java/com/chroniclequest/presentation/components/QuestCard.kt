@@ -24,10 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chroniclequest.domain.model.QuestCategory
 import com.chroniclequest.domain.model.QuestProgress
 import com.chroniclequest.domain.model.QuestState
 import com.chroniclequest.domain.model.VerificationMethod
 import com.chroniclequest.presentation.home.QuestUiModel
+import com.chroniclequest.presentation.theme.ArcanePurple
 import com.chroniclequest.presentation.theme.ExpEmerald
 import com.chroniclequest.presentation.theme.NeonCyan
 import com.chroniclequest.presentation.theme.QuestGold
@@ -76,6 +78,7 @@ fun QuestCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                quest.category?.let { CategoryChip(it) }
                 MethodChip(quest.verificationMethod, quest.targetValue)
                 RewardChip(quest.rewardExp, quest.rewardGold)
             }
@@ -189,6 +192,19 @@ private fun StatusPill(state: QuestState) {
         colors = AssistChipDefaults.assistChipColors(
             disabledLabelColor = color,
             disabledContainerColor = color.copy(alpha = 0.12f),
+        ),
+    )
+}
+
+@Composable
+private fun CategoryChip(category: QuestCategory) {
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        label = { Text("${category.emoji} ${category.label}") },
+        colors = AssistChipDefaults.assistChipColors(
+            disabledLabelColor = ArcanePurple,
+            disabledContainerColor = ArcanePurple.copy(alpha = 0.14f),
         ),
     )
 }
