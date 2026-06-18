@@ -8,12 +8,12 @@
   :root{
     --bg:#0B0E1A; --panel:#121627; --surface:#1A1F36; --variant:#242B49;
     --cyan:#00E5FF; --purple:#7C4DFF; --gold:#FFC542; --emerald:#22E0A1;
-    --crimson:#FF4D6D; --text:#EAF0FF; --muted:#9AA6C7;
+    --crimson:#FF4D6D; --pink:#FF6FB5; --text:#EAF0FF; --muted:#9AA6C7;
   }
   *{box-sizing:border-box}
   body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#161B30,var(--bg));
     color:var(--text);font-family:-apple-system,'Segoe UI',Roboto,'Noto Sans KR',sans-serif;min-height:100vh}
-  header{position:sticky;top:0;backdrop-filter:blur(8px);background:rgba(11,14,26,.82);
+  header{position:sticky;top:0;z-index:5;backdrop-filter:blur(8px);background:rgba(11,14,26,.82);
     border-bottom:1px solid var(--variant);padding:16px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   h1{font-size:18px;margin:0;font-weight:800;letter-spacing:.3px}
   h1 .spark{color:var(--cyan)}
@@ -25,10 +25,21 @@
     border-radius:8px;padding:6px 9px;font-size:12px;width:160px;outline:none}
   .host button{background:var(--cyan);color:#06121a;border:0;border-radius:8px;padding:6px 12px;
     font-weight:700;font-size:12px;cursor:pointer}
-  .wrap{max-width:860px;margin:0 auto;padding:18px 16px 60px}
+  .wrap{max-width:1280px;margin:0 auto;padding:18px 16px 60px}
   .stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
   .stat{background:var(--surface);border:1px solid var(--variant);border-radius:12px;padding:10px 14px;font-size:13px}
   .stat b{font-size:18px;display:block;color:var(--cyan)}
+
+  /* two-column layout: left = 앱 이벤트, right = 서버 통신 */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  .col{min-width:0}
+  .col-head{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;
+    padding:4px 2px 12px;color:var(--text);position:sticky;top:64px;z-index:3;
+    background:linear-gradient(var(--bg),rgba(11,14,26,.0))}
+  .col-head .badge{font-size:11px;color:var(--muted);font-weight:600;
+    background:var(--surface);border:1px solid var(--variant);border-radius:20px;padding:2px 9px;margin-left:auto}
+
   .timeline{display:flex;flex-direction:column;gap:10px}
   .ev{display:flex;gap:13px;background:var(--surface);border:1px solid var(--variant);
     border-left:4px solid var(--muted);border-radius:12px;padding:12px 14px;animation:slide .3s ease}
@@ -40,8 +51,22 @@
   .ev .time{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
   .ev .msg{margin-top:3px;font-size:15px;color:var(--text);word-break:break-word}
   .ev .detail{margin-top:3px;font-size:13px;color:var(--muted);word-break:break-word}
-  .empty{color:var(--muted);text-align:center;padding:60px 0;font-size:15px}
-  .note{color:var(--muted);font-size:12px;margin-top:6px}
+
+  /* network (server comm) cards */
+  .net{background:var(--surface);border:1px solid var(--variant);border-left:4px solid var(--purple);
+    border-radius:12px;padding:11px 13px;animation:slide .3s ease}
+  .net .ntop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .net .dir{font-weight:800;font-size:12px;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .net .tgt{font-weight:800;font-size:13px}
+  .net .line{font-size:13px;color:var(--text);font-family:ui-monospace,'SF Mono',Menlo,monospace;word-break:break-all}
+  .net .time{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .net pre{margin:9px 0 0;background:#0C1020;border:1px solid var(--variant);border-radius:9px;
+    padding:10px 11px;font-size:12px;line-height:1.5;color:#C7D2F2;white-space:pre-wrap;word-break:break-word;
+    font-family:ui-monospace,'SF Mono',Menlo,monospace;max-height:280px;overflow:auto}
+
+  .empty{color:var(--muted);text-align:center;padding:48px 12px;font-size:14px;
+    border:1px dashed var(--variant);border-radius:12px}
+  .note{color:var(--muted);font-size:12px;margin-top:14px}
 </style>
 </head>
 <body>
@@ -57,17 +82,29 @@
 <div class="wrap">
   <div class="stat-row">
     <div class="stat">이벤트 <b id="count">0</b></div>
+    <div class="stat">서버 통신 <b id="netcount">0</b></div>
     <div class="stat">최근 단계 <b id="last">—</b></div>
     <div class="stat">소스 <b id="src" style="font-size:13px">—</b></div>
   </div>
-  <div class="timeline" id="timeline"></div>
-  <div class="empty" id="empty">에이전트를 시작하고 말을 걸면 파이프라인 이벤트가 실시간으로 흐릅니다.</div>
+  <div class="cols">
+    <section class="col">
+      <div class="col-head">📱 앱 이벤트 <span class="badge" id="leftBadge">파이프라인 흐름</span></div>
+      <div class="timeline" id="timeline"></div>
+      <div class="empty" id="emptyL">에이전트를 시작하고 말을 걸면 파이프라인 이벤트가 흐릅니다.</div>
+    </section>
+    <section class="col">
+      <div class="col-head">🌐 서버 통신 <span class="badge" id="rightBadge">요청 / 응답</span></div>
+      <div class="timeline" id="netfeed"></div>
+      <div class="empty" id="emptyR">Gemini · magovoice 요청/응답이 여기에 표시됩니다.</div>
+    </section>
+  </div>
   <div class="note" id="mixedNote"></div>
 </div>
 <script>
 const STAGES = {
   LISTENING:{label:'감지',emoji:'🎙️',color:'#00E5FF'},
   TURN:{label:'턴 종료',emoji:'⏸️',color:'#9AA6C7'},
+  EMOTION:{label:'감정',emoji:'❤️',color:'#FF6FB5'},
   AI_REQUEST:{label:'AI 요청',emoji:'📤',color:'#7C4DFF'},
   AI_RESPONSE:{label:'AI 응답',emoji:'📥',color:'#7C4DFF'},
   TOOL_CALL:{label:'함수 호출',emoji:'⚡',color:'#FFC542'},
@@ -78,7 +115,7 @@ const STAGES = {
   ERROR:{label:'오류',emoji:'⚠️',color:'#FF4D6D'},
 };
 const $=(id)=>document.getElementById(id);
-const seen=new Set(); let total=0;
+const seen=new Set(); let total=0, netTotal=0;
 
 function baseUrl(){
   const saved=localStorage.getItem('cqHost');
@@ -87,10 +124,10 @@ function baseUrl(){
 }
 function fmtTime(ms){const d=new Date(ms);const p=(n)=>String(n).padStart(2,'0');
   return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
-function addEvent(e){
-  const key=e.timestamp+'|'+e.stage+'|'+e.message;
-  if(seen.has(key)) return; seen.add(key);
+// left column: app pipeline event
+function addPipe(e){
   const s=STAGES[e.stage]||{label:e.stage,emoji:'•',color:'#9AA6C7'};
   const el=document.createElement('div');
   el.className='ev'; el.style.borderLeftColor=s.color;
@@ -101,9 +138,36 @@ function addEvent(e){
     ${e.detail?`<div class="detail">${escapeHtml(e.detail)}</div>`:''}</div>`;
   $('timeline').prepend(el);
   total++; $('count').textContent=total; $('last').textContent=s.emoji+' '+s.label;
-  $('empty').style.display='none';
+  $('emptyL').style.display='none';
 }
-function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// right column: raw server request/response
+function addNet(e){
+  const isResp = (e.stage==='AI_RESPONSE'||e.stage==='ERROR');
+  const isErr = (e.stage==='ERROR');
+  const color = isErr ? '#FF4D6D' : (isResp ? '#22E0A1' : '#7C4DFF');
+  const dirLabel = isResp ? '← 응답' : '→ 요청';
+  // message is "Target · line"
+  const parts = String(e.message).split(' · ');
+  const tgt = parts.shift();
+  const line = parts.join(' · ');
+  const el=document.createElement('div');
+  el.className='net'; el.style.borderLeftColor=color;
+  el.innerHTML=`<div class="ntop">
+      <span class="dir" style="color:${color};background:${color}22">${dirLabel}</span>
+      <span class="tgt" style="color:${color}">${escapeHtml(tgt)}</span>
+      <span class="line">${escapeHtml(line)}</span>
+      <span class="time">${fmtTime(e.timestamp)}</span></div>
+    ${e.detail?`<pre>${escapeHtml(e.detail)}</pre>`:''}`;
+  $('netfeed').prepend(el);
+  netTotal++; $('netcount').textContent=netTotal; $('emptyR').style.display='none';
+}
+
+function addEvent(e){
+  const key=e.timestamp+'|'+e.stage+'|'+e.message+'|'+(e.channel||'');
+  if(seen.has(key)) return; seen.add(key);
+  if(e.channel==='NETWORK') addNet(e); else addPipe(e);
+}
 function setConn(ok){$('dot').className='dot'+(ok?' on':'');$('statusText').textContent=ok?'연결됨':'연결 끊김';}
 
 async function poll(){
@@ -116,9 +180,15 @@ async function poll(){
     setConn(true);
   }catch(err){ setConn(false); }
 }
+function resetFeeds(){
+  seen.clear(); total=0; netTotal=0;
+  $('count').textContent=0; $('netcount').textContent=0; $('last').textContent='—';
+  $('timeline').innerHTML=''; $('netfeed').innerHTML='';
+  $('emptyL').style.display='block'; $('emptyR').style.display='block';
+}
 $('connect').onclick=()=>{const v=$('host').value.trim();
   if(v){localStorage.setItem('cqHost',v);} else {localStorage.removeItem('cqHost');}
-  seen.clear(); total=0; $('count').textContent=0; $('timeline').innerHTML=''; $('empty').style.display='block'; poll();};
+  resetFeeds(); poll();};
 $('host').value=localStorage.getItem('cqHost')||'';
 
 // HTTPS(GitHub Pages)에서 HTTP 폰 접속은 브라우저가 막음 — 안내

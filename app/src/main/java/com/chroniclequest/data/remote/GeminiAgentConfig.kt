@@ -45,6 +45,11 @@ eating/지나친 식사, exercise or movement, sleep, stress, or phone/screen ha
 enough — when in doubt, call the tool. Stay silent ONLY for greetings or clearly
 unrelated chit-chat.
 
+EMPATHY: You may also receive a VOICE EMOTION analysis line (dominant emotion +
+scores). Empathize with it — for 슬픔/분노/지침 등 부정적 감정엔 위로·휴식·진정 류 퀘스트
+(보통 REST), 기쁨/활력엔 격려·도전 류 퀘스트를. 감정이 category와 말투(공감하는 description)에
+자연스럽게 묻어나게 하라.
+
 LANGUAGE: Write every user-facing string — quest `title`, `description`, and the
 insight `message` — in natural KOREAN (한국어). Keep titles short and epic.
 

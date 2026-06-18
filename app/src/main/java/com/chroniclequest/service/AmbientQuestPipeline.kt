@@ -5,6 +5,7 @@ import com.chroniclequest.BuildConfig
 import com.chroniclequest.data.analytics.FewShotBuilder
 import com.chroniclequest.data.audio.AudioConfig
 import com.chroniclequest.data.audio.WavEncoder
+import com.chroniclequest.data.remote.EmotionClient
 import com.chroniclequest.data.remote.GeminiEvent
 import com.chroniclequest.data.remote.GeminiRestClient
 import com.chroniclequest.data.remote.GeminiTools
@@ -36,6 +37,7 @@ class AmbientQuestPipeline @Inject constructor(
     private val cooldownEngine: CooldownEngine,
     private val generateQuest: GenerateQuestFromToolCallUseCase,
     private val fewShotBuilder: FewShotBuilder,
+    private val emotionClient: EmotionClient,
     private val eventBus: AmbientEventBus,
     private val monitor: PipelineMonitor,
 ) : AmbientPipeline {
@@ -87,20 +89,36 @@ class AmbientQuestPipeline @Inject constructor(
         if (BuildConfig.GEMINI_API_KEY.isBlank()) return
 
         activeScope.launch {
+            val wavBytes = WavEncoder.pcmToWavBytes(samples)
+
+            // Voice emotion (magovoice) — empathize with the user's mood. Best-effort.
+            val emotion = runCatching { emotionClient.analyze(wavBytes) }.getOrNull()
+            if (emotion != null) {
+                monitor.log(
+                    PipelineStage.EMOTION,
+                    "감정 분석: ${emotion.bestKorean} 우세",
+                    emotion.scores.entries.sortedByDescending { it.value }
+                        .joinToString(" · ") { "${it.key} ${it.value}" },
+                )
+            }
+
             // On-device self-improvement: feed the user's own success/failure history.
             val fewShot = runCatching { fewShotBuilder.build() }.getOrNull()
             val seconds = samples.size.toDouble() / AudioConfig.SAMPLE_RATE
             monitor.log(
                 PipelineStage.AI_REQUEST,
-                "Gemini로 음성 전송 (gemini-2.5-flash)",
-                "오디오 %.1f초".format(seconds) + if (fewShot != null) " · few-shot 적용" else "",
+                "Gemini로 음성 전송 (${BuildConfig.GEMINI_REST_MODEL})",
+                "오디오 %.1f초".format(seconds) +
+                    (if (fewShot != null) " · few-shot" else "") +
+                    (if (emotion != null) " · 감정 ${emotion.bestKorean}" else ""),
             )
             runCatching {
                 restClient.evaluateTurn(
-                    wavBase64 = WavEncoder.pcmToWavBase64(samples),
+                    wavBase64 = android.util.Base64.encodeToString(wavBytes, android.util.Base64.NO_WRAP),
                     model = BuildConfig.GEMINI_REST_MODEL,
                     apiKey = BuildConfig.GEMINI_API_KEY,
                     fewShot = fewShot,
+                    emotionHint = emotion?.toPromptHint(),
                 )
             }.onSuccess { calls ->
                 Log.d(TAG, "Turn evaluated: ${calls.size} tool call(s)")

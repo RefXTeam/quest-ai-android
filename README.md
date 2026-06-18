@@ -21,6 +21,7 @@
 - 🎙️ **항상 켜진 주변 음성 캡처** — `microphone` 포그라운드 서비스, 백그라운드/화면 off에서도 유지
 - 🔊 **로컬 RMS/VAD 게이트** — 음성 구간만 전송해 대역폭·토큰 절약
 - 🧠 **Gemini 함수 호출** — `triggerDynamicQuest`(만능 동적 함수, category 포함) / `giveUserQuest` / `sendInsightTip`
+- ❤️ **음성 감정 분석(magovoice)** — 매 턴 음성에서 우세 감정(기쁨/중립/분노/슬픔/놀람)을 추출해 Gemini 맥락에 주입 → 공감 퀘스트(슬픔·분노엔 위로/휴식, 기쁨엔 격려/도전)
 - ⏱️ **3초 침묵 턴 종료 + 쿨다운** — 말 중간 끊김 방지, 과도한 퀘스트 억제(데모 1분 · 프로덕션 20분)
 - 🎮 **Material 3 다크 RPG UI** — 레벨/경험치 바/골드 HUD, 퀘스트 모달, Canvas 컨페티
 - 📈 **진행도 & 유효시간** — 진행 바(걸음/화면끔)·남은 시간 카운트다운을 매초 표시
@@ -47,6 +48,8 @@ flowchart TD
 
     Eval["AmbientQuestPipeline<br/>턴 평가"] --> Wav["WavEncoder<br/>PCM → WAV"]
     Eval --> FS["FewShotBuilder<br/>(과거 성공/실패 사례)"]
+    Wav --> Emo["EmotionClient<br/>magovoice 감정 분석"]
+    Emo -.->|"우세 감정 + 점수 (실패 시 생략)"| Rest
     Wav --> Rest["GeminiRestClient<br/>generateContent (gemini-2.5-flash-lite)"]
     FS -.->|"시스템 프롬프트 주입"| Rest
     Rest -->|"functionCall<br/>(triggerDynamicQuest/giveUserQuest)"| Cool{"CooldownEngine<br/>쿨다운 경과?"}
@@ -82,6 +85,7 @@ sequenceDiagram
     participant S as AmbientAudioService
     participant P as AmbientQuestPipeline
     participant F as FewShotBuilder
+    participant E as magovoice
     participant G as Gemini REST
     participant DB as Room
     participant UI as HomeScreen
@@ -90,11 +94,13 @@ sequenceDiagram
     U->>S: 한국어로 말함
     S->>P: 음성 청크 (VAD 통과)
     Note over P: 3초 침묵 → 턴 종료
+    P->>E: WAV 감정 분석 요청
+    E-->>P: 우세 감정 + 점수 (실패 시 생략)
     P->>F: 과거 성공/실패 사례 요청
     F->>DB: COMPLETED / DISMISSED·EXPIRED 조회
     DB-->>F: 사례 목록
     F-->>P: few-shot 블록
-    P->>G: WAV + 시스템 프롬프트(+few-shot) + tools
+    P->>G: WAV + 감정 hint + 시스템 프롬프트(+few-shot) + tools
     G-->>P: triggerDynamicQuest(category + 한국어 + contextSummary)
     Note over P: 쿨다운 통과 시에만
     P->>DB: 퀘스트 저장 (TRIGGERED, 맥락 포함)
@@ -180,10 +186,10 @@ flowchart LR
 | 레이어 | 핵심 클래스 |
 |--------|-------------|
 | `data/audio` | `AudioCaptureManager`, `VadProcessor`, `WavEncoder`, `PcmUtils` |
-| `data/remote` | `GeminiRestClient`(기본), `GeminiLiveClient`(WebSocket), `GeminiAgentConfig` |
+| `data/remote` | `GeminiRestClient`(기본), `GeminiLiveClient`(WebSocket), `GeminiAgentConfig`, `EmotionClient`(magovoice 음성 감정) |
 | `data/local` | `AppDatabase`(v2), `QuestLogEntity`(라이브 퀘스트 + 플라이휠 로그 겸용) |
 | `data/analytics` | `FlywheelExporter`(JSON 내보내기), `FewShotBuilder`(런타임 프롬프트 주입) |
-| `domain/model` | `Quest`, `QuestProgress`, `QuestCategory`, `QuestState`, `PipelineEvent`, `UserStats` |
+| `domain/model` | `Quest`, `QuestProgress`, `QuestCategory`, `QuestState`, `PipelineEvent`, `EmotionResult`, `UserStats` |
 | `domain` | `PipelineMonitor`(모니터 이벤트 버스), `AmbientEventBus` |
 | `domain/engine` | `SilenceDetector`(3초), `CooldownEngine`(쿨다운) |
 | `service` | `AmbientAudioService`, `AmbientQuestPipeline`, `QuestVerificationManager` + 검증기, `MonitorWebServer`, `BatteryOptimization` |
@@ -218,23 +224,42 @@ flowchart LR
 
 ---
 
+## 음성 감정 분석 (magovoice)
+
+매 턴, Gemini로 보내는 동일한 WAV를 **magovoice 감정 인식 API**에도 보내 사용자의 감정을 읽고, 그
+결과를 Gemini 요청 맥락에 넣어 **공감하는 퀘스트**를 만듭니다.
+
+- **`EmotionClient`** — `POST https://api.magovoice.com/emotion_recognition/v1/run?is_speech=false`
+  (multipart `file`/`content_id`/`out_dir`). **인증 키 불필요**, 우리가 만드는 WAV를 그대로 수락.
+  응답의 `best_emotion` + `emotion`(HAPPINESS/NEUTRAL/ANGRY/SADNESS/SURPRISE 점수)을 `EmotionResult`로 변환.
+- **best-effort** — 실패/타임아웃(15초) 시 `null`을 반환하고 파이프라인은 그대로 진행(감정 없이 퀘스트 생성).
+- **주입** — `EmotionResult.toPromptHint()`("음성 감정 분석 — 우세 감정: 슬픔 …")를 오디오 `Part` 뒤에 텍스트
+  `Part`로 추가. 시스템 프롬프트가 "슬픔·분노엔 위로/휴식(REST), 기쁨엔 격려/도전"으로 category·말투를 조정.
+- **모니터** — `EMOTION`(❤️) 단계가 "감정 분석: {우세 감정} 우세 + 점수 요약"으로 표시됩니다.
+
+---
+
 ## 실시간 파이프라인 모니터 (발표용)
 
 데이터 흐름(음성 → Gemini → 퀘스트)을 **웹페이지/앱에서 실시간**으로 볼 수 있습니다.
 
-- **`PipelineMonitor`** — 각 단계(감지 → 턴 종료 → AI 요청 → AI 응답 → 함수 호출 → 쿨다운 →
-  퀘스트 생성 → 검증 → 보상)가 이벤트를 emit하는 전역 버스.
+- **2열 구성** — **왼쪽 = 앱 이벤트**(감지 → 턴 종료 → 감정 → AI 요청 → AI 응답 → 함수 호출 →
+  쿨다운 → 퀘스트 생성 → 검증 → 보상 파이프라인 흐름), **오른쪽 = 서버 통신**(Gemini·magovoice의
+  실제 **요청/응답** — HTTP 라인 + 본문). 각 이벤트는 `channel`(`PIPELINE`/`NETWORK`)로 분류됩니다.
+- **`PipelineMonitor`** — 각 단계가 이벤트를 emit하는 전역 버스. `log(stage, msg, detail, channel)` +
+  서버 통신용 `netRequest`/`netResponse` 헬퍼. `GeminiRestClient`·`EmotionClient`가 요청/응답을 직접 기록
+  (Gemini 요청의 **base64 오디오는 요약·생략**, API 키는 미표시).
 - **`MonitorWebServer`**(NanoHTTPD, 포트 **8080**) — 에이전트 시작 시 자동 기동. `monitor.html` 서빙 +
   `/events.json` 피드(CORS 개방).
 - **웹 페이지** — `app/src/main/assets/monitor.html`(앱 서빙) + [`docs/index.html`](docs/index.html)(GitHub Pages 사본).
-  1초 폴링, 단계별 색/이모지 타임라인.
-- **앱 내 `MonitorScreen`** — 동일 타임라인 + 웹 모니터 주소(`http://<폰IP>:8080`) 안내.
+  1초 폴링, 2열 타임라인(좁은 화면에선 세로로 스택).
+- **앱 내 `MonitorScreen`** — 폰 화면은 좁아 **왼쪽(앱 이벤트)만** 표시(서버 통신 상세는 발표 PC 2열 뷰).
 
 ### 발표 사용법
 1. 폰: 앱 실행 → **에이전트 시작** (웹서버 자동 기동)
 2. 앱 **모니터 화면**(홈 상단 📺 아이콘)에 표시되는 `http://<폰IP>:8080` 확인
-3. **발표 PC 브라우저**에서 그 주소 접속 → 실시간 타임라인
-4. 말을 걸면 폰·웹 양쪽에 단계별 이벤트가 흐름. **쿨다운 1분**(데모)이라 빠른 반복 시연 가능
+3. **발표 PC 브라우저**에서 그 주소 접속 → 2열 실시간 뷰(왼쪽 앱 이벤트 · 오른쪽 서버 통신)
+4. 말을 걸면 왼쪽엔 파이프라인 단계, 오른쪽엔 Gemini·magovoice 요청/응답 본문이 흐름. **쿨다운 1분**(데모)이라 빠른 반복 시연 가능
 
 > ⚠️ 같은 Wi-Fi(기기 간 통신 허용)가 필요합니다. 회사/게스트망은 기기 격리(AP isolation)로 막힐 수
 > 있으니 **휴대폰 핫스팟**을 쓰면 확실합니다. GitHub Pages(HTTPS)에서 폰(HTTP)으로의 직접 연결은

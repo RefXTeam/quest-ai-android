@@ -13,6 +13,7 @@ val ArcanePurple = Color(0xFF7C4DFF)
 val QuestGold = Color(0xFFFFC542)
 val ExpEmerald = Color(0xFF22E0A1)
 val DangerCrimson = Color(0xFFFF4D6D)
+val EmotionPink = Color(0xFFFF6FB5)
 
 val TextPrimary = Color(0xFFEAF0FF)
 val TextSecondary = Color(0xFF9AA6C7)

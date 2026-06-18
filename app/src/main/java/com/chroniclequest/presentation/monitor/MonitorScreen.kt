@@ -30,11 +30,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.chroniclequest.domain.model.MonitorChannel
 import com.chroniclequest.domain.model.PipelineEvent
 import com.chroniclequest.domain.model.PipelineStage
 import com.chroniclequest.presentation.theme.ArcanePurple
 import com.chroniclequest.presentation.theme.DangerCrimson
 import com.chroniclequest.presentation.theme.ExpEmerald
+import com.chroniclequest.presentation.theme.EmotionPink
 import com.chroniclequest.presentation.theme.NeonCyan
 import com.chroniclequest.presentation.theme.QuestGold
 import com.chroniclequest.presentation.theme.TextSecondary
@@ -65,6 +67,9 @@ private fun MonitorContent(
     webUrl: String?,
     events: List<PipelineEvent>,
 ) {
+    // Phone view stays the high-level pipeline flow; the raw server request/response
+    // lane (NETWORK) is shown on the wide web monitor's right column.
+    val pipelineEvents = events.filter { it.channel == MonitorChannel.PIPELINE }
     androidx.compose.material3.Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -99,7 +104,7 @@ private fun MonitorContent(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
         ) {
             item { WebUrlCard(webUrl) }
-            if (events.isEmpty()) {
+            if (pipelineEvents.isEmpty()) {
                 item {
                     Text(
                         "에이전트를 시작하고 말을 걸면 파이프라인 이벤트가 실시간으로 흐릅니다.",
@@ -109,7 +114,7 @@ private fun MonitorContent(
                     )
                 }
             }
-            items(events.asReversed()) { event -> EventRow(event) }
+            items(pipelineEvents.asReversed()) { event -> EventRow(event) }
         }
     }
 }
@@ -190,6 +195,7 @@ private fun stageColor(stage: PipelineStage): Color = when (stage) {
     PipelineStage.TOOL_CALL -> QuestGold
     PipelineStage.QUEST, PipelineStage.REWARD -> ExpEmerald
     PipelineStage.TURN, PipelineStage.COOLDOWN -> TextSecondary
+    PipelineStage.EMOTION -> EmotionPink
     PipelineStage.ERROR -> DangerCrimson
 }
 
