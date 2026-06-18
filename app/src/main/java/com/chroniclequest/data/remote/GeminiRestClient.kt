@@ -9,6 +9,7 @@ import com.chroniclequest.data.remote.dto.GenerationConfig
 import com.chroniclequest.data.remote.dto.InlineData
 import com.chroniclequest.data.remote.dto.Part
 import com.chroniclequest.data.remote.dto.ToolConfig
+import com.chroniclequest.domain.PipelineMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -30,6 +31,7 @@ import javax.inject.Singleton
 class GeminiRestClient @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val json: Json,
+    private val monitor: PipelineMonitor,
 ) {
     // The shared client has no read timeout (it's tuned for the long-lived Live
     // WebSocket). A turn evaluation is a bounded request, so cap it to avoid
@@ -49,24 +51,18 @@ class GeminiRestClient @Inject constructor(
         model: String,
         apiKey: String,
         fewShot: String? = null,
+        emotionHint: String? = null,
     ): List<GeminiEvent.ToolCallReceived> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             throw IllegalStateException(GeminiLiveClient.MISSING_KEY_MESSAGE)
         }
+        val userParts = buildList {
+            add(Part(inlineData = InlineData(mimeType = "audio/wav", data = wavBase64)))
+            // Voice-emotion analysis context (magovoice), when available.
+            if (!emotionHint.isNullOrBlank()) add(Part(text = emotionHint))
+        }
         val request = GenerateContentRequest(
-            contents = listOf(
-                Content(
-                    role = "user",
-                    parts = listOf(
-                        Part(
-                            inlineData = InlineData(
-                                mimeType = "audio/wav",
-                                data = wavBase64,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
+            contents = listOf(Content(role = "user", parts = userParts)),
             systemInstruction = GeminiAgentConfig.systemInstruction(fewShot),
             tools = GeminiAgentConfig.tools(),
             toolConfig = ToolConfig(FunctionCallingConfig(mode = "AUTO")),
@@ -85,8 +81,32 @@ class GeminiRestClient @Inject constructor(
             .post(body)
             .build()
 
+        // Server-comm panel (right column): summarise the request without dumping the
+        // multi-megabyte base64 audio. Header omitted so the API key is never shown.
+        val audioKb = wavBase64.length * 3 / 4 / 1024
+        monitor.netRequest(
+            target = "Gemini",
+            line = "POST $model:generateContent",
+            body = buildString {
+                appendLine("contents[0].role: user")
+                appendLine("  • inlineData: audio/wav (~${audioKb}KB, base64 생략)")
+                if (!emotionHint.isNullOrBlank()) appendLine("  • text: \"$emotionHint\"")
+                appendLine("tools: triggerDynamicQuest, giveUserQuest, sendInsightTip")
+                appendLine("toolConfig.functionCallingConfig.mode: AUTO")
+                appendLine("generationConfig: TEXT, temperature 0.8")
+                if (!fewShot.isNullOrBlank()) append("systemInstruction: 기본 + few-shot 주입")
+                else append("systemInstruction: 기본")
+            },
+        )
+
         restHttpClient.newCall(httpRequest).execute().use { response ->
             val payload = response.body?.string().orEmpty()
+            monitor.netResponse(
+                target = "Gemini",
+                line = "HTTP ${response.code}",
+                body = payload.ifBlank { "(빈 응답)" }.take(1400),
+                ok = response.isSuccessful,
+            )
             if (!response.isSuccessful) {
                 Log.w(TAG, "generateContent HTTP ${response.code}: ${payload.take(200)}")
                 // Surface as an error (not an empty "silent" response) so the monitor
